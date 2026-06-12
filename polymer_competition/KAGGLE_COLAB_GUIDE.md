@@ -32,13 +32,17 @@ This method ensures your checkpoints and predictions are saved even if the Colab
    ```
 
 ### Option B: Via GitHub Clone
-1. Push this folder to a GitHub repository (it can be private).
-2. In Colab, clone the repository:
+1. In Colab, clone the repository. If your repository is **private**, you will need to use a GitHub Personal Access Token (PAT):
    ```bash
-   !git clone https://github.com/yourusername/polymer_competition.git
-   %cd polymer_competition
+   # If the repository is PUBLIC:
+   !git clone https://github.com/NotShubham1112/Poly.git
+   
+   # If the repository is PRIVATE, use your username and PAT instead:
+   # !git clone https://<USERNAME>:<YOUR_PAT>@github.com/NotShubham1112/Poly.git
+   
+   %cd Poly/polymer_competition
    ```
-3. Install requirements and train:
+2. Install requirements and train:
    ```bash
    !pip install -r requirements.txt
    !python generate_all.py
