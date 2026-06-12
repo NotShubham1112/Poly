@@ -3,7 +3,7 @@
 # =============================================================================
 finetuning:
   task: "regression"           # 'regression', 'multitask_regression'
-  target: "Tg"                 # property column
+  target: "property"            # competition target column
 
   optimizer:
     type: "adamw"

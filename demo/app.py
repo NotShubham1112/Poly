@@ -1,26 +1,16 @@
 """
-demo.app.py
-Standalone Streamlit entry point.
+demo/app.py
+Standalone Streamlit entry point (mirrors inference/chat_interface.py).
 
 Run:
     streamlit run demo/app.py
 """
-import streamlit as st
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from inference.predictor import PolymerPredictor
+# Ensure project root is importable
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-
-st.set_page_config(page_title="PolyChain Demo", page_icon="🧬")
-st.title("🧬 PolyChain Demo")
-
-smiles = st.text_input("Polymer SMILES", value="*CCO*")
-if st.button("Predict"):
-    try:
-        pred = PolymerPredictor("outputs/checkpoints/polychain_best.pt")
-        yhat = pred.predict([smiles])
-        st.metric("Predicted Tg (°C)", f"{yhat[0]:.2f}")
-    except Exception as e:
-        st.error(str(e))
+# Re-export the full chat interface — identical functionality
+# This file exists so `streamlit run demo/app.py` works as a standalone entry.
+exec(open(str(Path(__file__).resolve().parent.parent / "inference" / "chat_interface.py")).read())

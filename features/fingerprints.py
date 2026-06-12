@@ -27,7 +27,7 @@ def _safe_mol(smiles: str):
         return None
 
 
-def morgan_fingerprints(smiles_list, radius: int = 2, n_bits: int = 1024) -> np.ndarray:
+def morgan_fingerprints(smiles_list, radius: int = 2, n_bits: int = 2048) -> np.ndarray:
     """Morgan (ECFP) circular fingerprints.
 
     Parameters
@@ -63,7 +63,7 @@ def maccs_fingerprints(smiles_list) -> np.ndarray:
     return out
 
 
-def atom_pair_fingerprints(smiles_list, n_bits: int = 1024) -> np.ndarray:
+def atom_pair_fingerprints(smiles_list, n_bits: int = 2048) -> np.ndarray:
     """Atom-pair fingerprints (topological distance between atom pairs)."""
     gen = rdFingerprintGenerator.GetAtomPairGenerator(fpSize=n_bits)
     out = np.zeros((len(smiles_list), n_bits), dtype=np.uint8)
@@ -76,7 +76,7 @@ def atom_pair_fingerprints(smiles_list, n_bits: int = 1024) -> np.ndarray:
     return out
 
 
-def topological_torsion_fingerprints(smiles_list, n_bits: int = 1024) -> np.ndarray:
+def topological_torsion_fingerprints(smiles_list, n_bits: int = 2048) -> np.ndarray:
     """Topological torsion fingerprints."""
     gen = rdFingerprintGenerator.GetTopologicalTorsionGenerator(fpSize=n_bits)
     out = np.zeros((len(smiles_list), n_bits), dtype=np.uint8)
@@ -101,13 +101,13 @@ def all_fingerprints(smiles_list, cfg: dict | None = None) -> dict[str, np.ndarr
         "morgan": morgan_fingerprints(
             smiles_list,
             radius=cfg.get("morgan_radius", 2),
-            n_bits=cfg.get("morgan_bits", 1024),
+            n_bits=cfg.get("morgan_bits", 2048),
         ),
         "maccs": maccs_fingerprints(smiles_list),
         "atom_pair": atom_pair_fingerprints(
-            smiles_list, n_bits=cfg.get("atom_pair_bits", 1024)
+            smiles_list, n_bits=cfg.get("atom_pair_bits", 2048)
         ),
         "torsion": topological_torsion_fingerprints(
-            smiles_list, n_bits=cfg.get("torsion_bits", 1024)
+            smiles_list, n_bits=cfg.get("torsion_bits", 2048)
         ),
     }

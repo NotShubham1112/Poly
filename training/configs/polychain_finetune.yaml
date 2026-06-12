@@ -1,7 +1,7 @@
 # PolyChain fine-tuning hyperparameters (symlinked from models/polychain/configs/finetune.yaml)
 finetuning:
   task: "regression"
-  target: "Tg"
+  target: "property"
   hidden_dim: 256
   n_backbone_layers: 4
   n_hamf_layers: 2

@@ -200,6 +200,37 @@ def molecular_weight_monomer(smiles: str) -> float:
     return rdMolDescriptors.CalcExactMolWt(mol)
 
 
+def rigidity_index(smiles: str) -> float:
+    """Rigidity proxy: (aromatic_atoms + ring_atoms) / total_heavy_atoms.
+
+    Higher values indicate a more rigid backbone.
+    """
+    mol = _safe_mol(smiles)
+    if mol is None:
+        return 0.0
+    heavy = [a for a in mol.GetAtoms() if a.GetSymbol() != "*"]
+    if not heavy:
+        return 0.0
+    rigid = sum(1 for a in heavy if a.GetIsAromatic() or a.IsInRing())
+    return rigid / len(heavy)
+
+
+def hbond_density(smiles: str) -> float:
+    """H-bond density: (HBD + HBA) / num_heavy_atoms.
+
+    Captures the proportion of H-bond capable sites per unit.
+    """
+    mol = _safe_mol(smiles)
+    if mol is None:
+        return 0.0
+    heavy = sum(1 for a in mol.GetAtoms() if a.GetSymbol() != "*")
+    if heavy == 0:
+        return 0.0
+    hbd = rdMolDescriptors.CalcNumHBD(mol)
+    hba = rdMolDescriptors.CalcNumHBA(mol)
+    return (hbd + hba) / heavy
+
+
 def compute_all_custom_features(smiles_list) -> pd.DataFrame:
     """Compute the full suite of polymer-specific features for a list of SMILES."""
     rows = []
@@ -217,6 +248,8 @@ def compute_all_custom_features(smiles_list) -> pd.DataFrame:
             "rotatable_bonds": rotatable_bonds(smi),
             "has_heteroatom_backbone": has_heteroatom_backbone(smi),
             "mol_weight_monomer": molecular_weight_monomer(smi),
+            "rigidity_index": rigidity_index(smi),
+            "hbond_density": hbond_density(smi),
         }
         row.update(ring_statistics(smi))
         row.update(hbond_donor_acceptor(smi))

@@ -29,7 +29,7 @@ cv:
   group_strategy: "scaffold"  # RDKit Murcko scaffold
 
 target:
-  column: "Tg"  # property to predict (e.g., Tg, Tm, density)
+  column: "property"  # competition target column (e.g., Tg, Tm, density)
   task: "regression"
 
 device:

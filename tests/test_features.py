@@ -7,16 +7,19 @@ import pytest
 
 from features.fingerprints import morgan_fingerprints, maccs_fingerprints
 from features.descriptors import compute_descriptors
-from features.custom_polymer import compute_all_custom_features, compute_cst
-from models.polychain.cst import CST_DIM, compute_cst_batch
+from features.custom_polymer import (
+    compute_all_custom_features, rigidity_index, hbond_density,
+    asterisks_count, repeat_unit_length, branching_indicator,
+)
+from models.polychain.cst import CST_DIM, compute_cst, compute_cst_batch
 
 
 SAMPLE_SMILES = ["*CCO*", "*C(C)C*", "*c1ccc(*)cc1*"]
 
 
 def test_morgan_shape():
-    X = morgan_fingerprints(SAMPLE_SMILES, radius=2, n_bits=1024)
-    assert X.shape == (3, 1024)
+    X = morgan_fingerprints(SAMPLE_SMILES, radius=2, n_bits=2048)
+    assert X.shape == (3, 2048)
     assert X.dtype == np.uint8
 
 
@@ -39,6 +42,29 @@ def test_custom_features_keys():
     assert "mol_weight_monomer" in df.columns
     assert "ring_count" in df.columns
     assert "aromatic_c_frac" in df.columns
+    assert "rigidity_index" in df.columns
+    assert "hbond_density" in df.columns
+
+
+def test_rigidity_index():
+    # Pure aliphatic *CCO* should have low rigidity
+    assert rigidity_index("*CCO*") < 0.5
+    # Aromatic ring should have high rigidity
+    assert rigidity_index("*c1ccccc1*") > 0.5
+
+
+def test_hbond_density():
+    assert hbond_density("*CCO*") >= 0.0
+    assert hbond_density("*CCCC*") < hbond_density("*CCO*")
+
+
+def test_asterisks_count():
+    assert asterisks_count("*CCO*") == 2
+    assert asterisks_count("*C(*)CO*") == 3
+
+
+def test_repeat_unit_length():
+    assert repeat_unit_length("*CCO*") == 3  # C, C, O
 
 
 def test_cst_dim():
