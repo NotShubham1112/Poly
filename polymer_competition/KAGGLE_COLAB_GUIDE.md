@@ -42,7 +42,10 @@ This method ensures your checkpoints and predictions are saved even if the Colab
    
    %cd Poly/polymer_competition
    ```
-2. Install requirements and train:
+2. **IMPORTANT: Add Competition Data**
+   Because competition data is private/large, it is NOT stored in the GitHub repository. You must upload `train.csv` and `test.csv` into the `data/` directory. You can do this by dragging and dropping them into the Colab file explorer under `Poly/polymer_competition/data/`.
+
+3. Install requirements and train:
    ```bash
    !pip install -r requirements.txt
    !python generate_all.py
