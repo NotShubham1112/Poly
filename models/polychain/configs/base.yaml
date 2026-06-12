@@ -1,0 +1,37 @@
+# =============================================================================
+# PolyChain – base architecture defaults
+# =============================================================================
+model:
+  name: "polychain"
+  in_atom_dim: 60          # see features.graphs.atom_features
+  in_edge_dim: 6           # see features.graphs.bond_features
+  hidden_dim: 256
+  n_backbone_layers: 4
+  n_hamf_layers: 2
+  n_hamf_heads: 4
+  cst_dim: 33
+  out_dim: 1
+  dropout: 0.2
+
+# Per-scale graph construction
+graph:
+  monomer: true
+  dimer: true
+  trimer: true
+  periodic: true   # also used by PECGN
+
+# Optimizer
+optimizer:
+  type: "adamw"
+  lr: 1.0e-4
+  weight_decay: 1.0e-5
+  betas: [0.9, 0.999]
+
+scheduler:
+  type: "cosine"
+  warmup_epochs: 5
+  min_lr: 1.0e-6
+
+regularization:
+  grad_clip: 1.0
+  label_smoothing: 0.0

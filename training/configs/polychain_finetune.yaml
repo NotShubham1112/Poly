@@ -1,0 +1,17 @@
+# PolyChain fine-tuning hyperparameters (symlinked from models/polychain/configs/finetune.yaml)
+finetuning:
+  task: "regression"
+  target: "Tg"
+  hidden_dim: 256
+  n_backbone_layers: 4
+  n_hamf_layers: 2
+  dropout: 0.2
+  epochs: 200
+  batch_size: 32
+  lr: 1.0e-4
+  weight_decay: 1.0e-5
+  grad_clip: 1.0
+  early_stopping:
+    enabled: true
+    patience: 30
+    metric: "val_rmse"

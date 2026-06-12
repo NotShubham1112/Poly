@@ -1,0 +1,12 @@
+# PolymerFusionNet hyperparameters
+fusionnet:
+  n_modalities: 5
+  dim: 256
+  n_heads: 4
+  n_layers: 2
+  dropout: 0.1
+  epochs: 100
+  batch_size: 32
+  lr: 1.0e-4
+  weight_decay: 1.0e-5
+  grad_clip: 1.0

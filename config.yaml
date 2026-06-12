@@ -1,0 +1,47 @@
+# =============================================================================
+# Polymer Competition – Global Configuration
+# =============================================================================
+# This file holds project-wide settings. Model-specific hyperparameters
+# live under training/configs/ and models/polychain/configs/.
+
+project:
+  name: "polymer_competition"
+  version: "1.0.0"
+  description: "Polymer property prediction with traditional ML + PolyChain"
+
+paths:
+  data_dir: "data/"
+  features_dir: "features/"
+  models_dir: "models/"
+  training_dir: "training/"
+  predictions_dir: "predictions/"
+  outputs_dir: "outputs/"
+  checkpoints_dir: "outputs/checkpoints/"
+  logs_dir: "outputs/logs/"
+  submissions_dir: "outputs/submissions/"
+
+seed: 42
+deterministic: true
+
+cv:
+  n_folds: 5
+  split_type: "group"  # 'group' uses SMILES scaffold; alternatives: 'random', 'stratified'
+  group_strategy: "scaffold"  # RDKit Murcko scaffold
+
+target:
+  column: "Tg"  # property to predict (e.g., Tg, Tm, density)
+  task: "regression"
+
+device:
+  use_cuda: true
+  gpu_id: 0
+
+logging:
+  level: "INFO"
+  tensorboard: true
+  csv_log: true
+
+ensemble:
+  strategy: "inverse_rmse"  # 'inverse_rmse', 'nelder_mead', 'stacking'
+  min_weight: 0.0
+  max_weight: 1.0

@@ -1,0 +1,36 @@
+# =============================================================================
+# PolyChain – fine-tuning defaults
+# =============================================================================
+finetuning:
+  task: "regression"           # 'regression', 'multitask_regression'
+  target: "Tg"                 # property column
+
+  optimizer:
+    type: "adamw"
+    lr: 1.0e-4
+    weight_decay: 1.0e-5
+
+  scheduler:
+    type: "cosine"
+    warmup_epochs: 5
+    min_lr: 1.0e-6
+
+  epochs: 200
+  batch_size: 32
+  early_stopping:
+    enabled: true
+    patience: 30
+    metric: "val_rmse"
+
+  # Loss
+  loss:
+    type: "mse"                # 'mse', 'huber', 'smooth_l1'
+    aux_pretrain_weight: 0.0   # set > 0 to keep the SSL head during FT
+    cst_predictor_weight: 0.1  # auxiliary head for CST sub-tasks
+
+  # Augmentation
+  augmentation:
+    smiles_randomize: true
+    n_augmentations: 5
+    chain_extension: true
+    substructure_mix: false    # only for copolymers

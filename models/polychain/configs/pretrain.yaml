@@ -1,0 +1,37 @@
+# =============================================================================
+# PolyChain – pretraining defaults
+# =============================================================================
+pretraining:
+  task: "asterisk_mask"        # 'asterisk_mask', 'sub_smiles_mask', 'joint'
+  max_mask: 2                  # max number of '*' to mask per chain
+  mask_prob: 0.15              # for sub-SMILES MLM
+
+  optimizer:
+    type: "adamw"
+    lr: 5.0e-5
+    weight_decay: 1.0e-5
+
+  scheduler:
+    type: "cosine"
+    warmup_epochs: 2
+    min_lr: 1.0e-6
+
+  epochs: 50
+  batch_size: 64
+  grad_clip: 1.0
+
+  # CST calibration (computed once before pretraining)
+  cst_calibration:
+    enabled: true
+    n_samples: 1000
+
+  # Loss weighting
+  loss_weights:
+    asterisk_mask: 1.0
+    sub_smiles_mask: 0.5
+
+  # SSL data augmentation
+  augmentation:
+    smiles_randomize: true
+    n_augmentations: 5
+    chain_extension: true

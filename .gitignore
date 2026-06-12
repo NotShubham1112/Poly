@@ -1,0 +1,63 @@
+# =============================================================================
+# Polymer Competition – Git Ignore
+# =============================================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+env/
+.venv/
+condaenv/
+
+# Jupyter
+.ipynb_checkpoints/
+profile_default/
+
+# Data – never commit large or proprietary data
+data/raw/
+data/processed/
+data/*.pkl
+data/*.npy
+data/*.npz
+!data/.gitkeep
+
+# Model weights and predictions
+outputs/checkpoints/
+outputs/submissions/
+predictions/*.pkl
+*.pt
+*.pth
+*.bin
+
+# Logs
+outputs/logs/
+*.log
+runs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Environment
+.env
+.env.local
+
+# Large files
+*.zip
+*.tar.gz
+*.h5
+*.hdf5

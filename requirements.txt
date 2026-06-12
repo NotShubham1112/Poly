@@ -1,0 +1,51 @@
+# =============================================================================
+# Polymer Competition – Python Dependencies
+# =============================================================================
+# Pinned to versions known to work together. Update carefully.
+
+# Core scientific stack
+numpy==1.24.3
+pandas==2.0.3
+scipy==1.11.2
+scikit-learn==1.3.1
+
+# Deep learning
+torch==2.1.0
+torch-geometric==2.4.0
+dgl==1.1.2
+
+# Cheminformatics
+rdkit==2023.9.1
+mordred==1.2.0
+
+# Pretrained chemistry language models
+transformers==4.35.0
+tokenizers==0.14.1
+
+# Tree / boosting models
+xgboost==2.0.2
+lightgbm==4.1.0
+catboost==1.2.2
+
+# Hyperparameter optimization
+optuna==3.4.0
+
+# Logging & utilities
+tensorboard==2.15.1
+tqdm==4.66.1
+pyyaml==6.0.1
+joblib==1.3.2
+matplotlib==3.8.0
+seaborn==0.13.0
+
+# Demo / app
+streamlit==1.28.1
+streamlit-chat==0.1.0
+
+# Testing
+pytest==7.4.3
+pytest-cov==4.1.0
+
+# Notebooks
+jupyter==1.0.0
+ipykernel==6.25.2
