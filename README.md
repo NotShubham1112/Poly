@@ -2,7 +2,13 @@
 
 > **A novel deep-learning architecture that predicts polymer properties directly from monomer SMILES by jointly modeling monomer, dimer, trimer, and periodic chain scales — without external LLM augmentation.**
 
+&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD
+
 ![Status](https://img.shields.io/badge/status-research--proposal-blue)![Domain](https://img.shields.io/badge/domain-polymer%20informatics-green)![Venue](https://img.shields.io/badge/target-ML4Materials%20workshop-orange)\---
+
+=======
+
+> > > > > > > 5a8159102b62a87b52a5530eec96585251d4846c
 
 ## Table of Contents
 
