@@ -1,0 +1,8 @@
+{
+  "run_id": "smoke_20260614_231215",
+  "timestamp": "2026-06-14T23:20:57.811739",
+  "data_path": "data\\train.csv",
+  "log_path": "outputs\\checkpoints\\generator_logs",
+  "n_samples": 902,
+  "n_valid_smiles": 902
+}

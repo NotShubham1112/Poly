@@ -18,6 +18,7 @@ torch-geometric>=2.4.0
 
 # Cheminformatics
 rdkit
+selfies>=2.1.0
 
 # Pretrained chemistry language models
 transformers>=4.35.0

@@ -10,4 +10,5 @@ Submodules:
     chemberta          : ChemBERTa embedding extractor + prediction head
     fusionnet          : PolymerFusionNet (multimodal cross-attention)
     polychain          : PolyChain – Hierarchical Periodic Transformer (★)
+    generator          : Generative polymer chemistry (SELFIES tokenizer, decoder, etc.)
 """

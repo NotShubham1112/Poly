@@ -19,6 +19,7 @@ paths:
   checkpoints_dir: "outputs/checkpoints/"
   logs_dir: "outputs/logs/"
   submissions_dir: "outputs/submissions/"
+  reports_dir: "reports/"
 
 seed: 42
 deterministic: true
