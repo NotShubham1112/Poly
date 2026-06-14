@@ -33,7 +33,9 @@ ALL_MODELS = [
 ]
 
 
-def run_fold(model_type: str, fold: int, config: str, person: str) -> dict | None:
+def run_fold(model_type: str, fold: int, config: str, person: str,
+             max_samples: int | None = None,
+             epochs: int | None = None) -> dict | None:
     """Train a single model on a single fold. Return metrics dict or None on failure."""
     # Find model-specific config
     model_cfg_candidates = [
@@ -54,6 +56,10 @@ def run_fold(model_type: str, fold: int, config: str, person: str) -> dict | Non
         "--config", config,
         "--person", person,
     ]
+    if max_samples:
+        cmd += ["--max_samples", str(max_samples)]
+    if epochs:
+        cmd += ["--epochs", str(epochs)]
     if model_cfg:
         cmd += ["--model_config", model_cfg]
 
@@ -88,6 +94,10 @@ def main():
                         help="Comma-separated fold indices (default: 0-4)")
     parser.add_argument("--person", default="cv_run",
                         help="Person name for prediction files")
+    parser.add_argument("--max_samples", type=int, default=None,
+                        help="Limit samples per fold (smoke test)")
+    parser.add_argument("--epochs", type=int, default=None,
+                        help="Override training epochs")
     args = parser.parse_args()
 
     with open(PROJECT_ROOT / args.config) as f:
@@ -103,7 +113,8 @@ def main():
     all_metrics = []
     for model_type in models:
         for fold in folds:
-            metrics = run_fold(model_type, fold, args.config, args.person)
+            metrics = run_fold(model_type, fold, args.config, args.person,
+                               max_samples=args.max_samples, epochs=args.epochs)
             if metrics:
                 all_metrics.append(metrics)
 
