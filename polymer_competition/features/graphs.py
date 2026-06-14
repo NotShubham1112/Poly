@@ -146,6 +146,8 @@ def kmer_graph(smiles: str, k: int = 2, y: Optional[float] = None) -> Optional[D
 
     Connection points ('*') on the right of copy i are bonded to the * on the
     left of copy i+1. The final molecule is a *-terminated chain of k repeats.
+
+    Falls back to monomer graph on construction errors (e.g., terminal heteroatoms).
     """
     mol = _safe_mol(smiles)
     if mol is None:
@@ -157,26 +159,29 @@ def kmer_graph(smiles: str, k: int = 2, y: Optional[float] = None) -> Optional[D
         # Fall back to monomer graph if SMILES is not a polymer (no asterisks)
         return smiles_to_graph(smiles, y=y)
 
-    # Build a string representation repeated k times
-    # Simple approach: rewrite SMILES by removing *, repeating, adding * at ends
-    # For robustness we rebuild the molecule manually
+    try:
+        return _build_kmer(mol, smiles, k, y, star_atoms)
+    except Exception:
+        # Fall back to monomer for problematic SMILES
+        return smiles_to_graph(smiles, y=y)
+
+
+def _build_kmer(mol, smiles, k, y, star_atoms):
+    """Internal helper that may raise on invalid chemistry."""
     base_atoms = [a for a in mol.GetAtoms() if a.GetSymbol() != "*"]
     base_bonds = [(b.GetBeginAtomIdx(), b.GetEndAtomIdx(), b.GetBondType())
                   for b in mol.GetBonds()
                   if b.GetBeginAtom().GetSymbol() != "*" and b.GetEndAtom().GetSymbol() != "*"]
 
-    # Index remap for the base atoms in the new molecule
     n_base = len(base_atoms)
     offset = lambda i, rep: i + rep * n_base
 
     rw = Chem.RWMol()
-    # First, create * atoms at both ends
-    rw.AddAtom(Chem.Atom(0))  # dummy atom (RDKit requires atom number; we use 0 as placeholder)
+    rw.AddAtom(Chem.Atom(0))
     star_left = 0
-    star_right = n_base * k  # will be assigned after we add bases
+    star_right = n_base * k
 
-    # Add base atoms k times
-    base_idx_map = []  # list of (rep, original_base_atom_idx) → new_idx
+    base_idx_map = []
     for rep in range(k):
         local_map = {}
         for orig in base_atoms:
@@ -187,22 +192,16 @@ def kmer_graph(smiles: str, k: int = 2, y: Optional[float] = None) -> Optional[D
             new_idx = rw.AddAtom(new_atom)
             local_map[orig.GetIdx()] = new_idx
             base_idx_map.append((rep, orig.GetIdx(), new_idx))
-        # Add intra-repeat bonds
         for a1, a2, bt in base_bonds:
             rw.AddBond(local_map[a1], local_map[a2], bt)
 
-    # Add the right * atom
     star_right = rw.AddAtom(Chem.Atom(0))
 
-    # Add inter-repeat bonds: connect star_right of rep r to star_left of rep r+1
     for rep in range(k - 1):
-        # Right-end atom of this rep is the last base atom in this rep
-        right_atom = max(local_map.values())  # the highest index added in this rep
-        left_atom = min(local_map.values())  # the lowest index added in next rep
+        right_atom = max(local_map.values())
+        left_atom = min(local_map.values())
         rw.AddBond(right_atom, left_atom, Chem.BondType.SINGLE)
 
-    # Connect outer * atoms
-    # Left * to first base atom
     if base_idx_map:
         first_base = min(idx for _, _, idx in base_idx_map[:n_base])
         rw.AddBond(star_left, first_base, Chem.BondType.SINGLE)
@@ -212,7 +211,6 @@ def kmer_graph(smiles: str, k: int = 2, y: Optional[float] = None) -> Optional[D
     new_mol = rw.GetMol()
     Chem.SanitizeMol(new_mol)
 
-    # Convert to graph
     x = torch.tensor([atom_features(a) for a in new_mol.GetAtoms()], dtype=torch.float)
     edges, edge_attrs = [], []
     for bond in new_mol.GetBonds():

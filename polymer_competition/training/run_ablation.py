@@ -112,7 +112,8 @@ def train_variant(model, train_loader, val_loader, cfg, device, n_epochs=100):
         n_batches = 0
         for batch in train_loader:
             opt.zero_grad()
-            batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v.to(device) if hasattr(v, "to") else v
+            batch = {k: v.to(device) if isinstance(v, torch.Tensor) else
+                     v.to(device) if hasattr(v, "to") else v
                      for k, v in batch.items()}
             pred = model(batch)
             y = batch["y"].view(-1)
@@ -129,7 +130,8 @@ def train_variant(model, train_loader, val_loader, cfg, device, n_epochs=100):
         preds, gts = [], []
         with torch.no_grad():
             for batch in val_loader:
-                batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v.to(device) if hasattr(v, "to") else v
+                batch = {k: v.to(device) if isinstance(v, torch.Tensor) else
+                         v.to(device) if hasattr(v, "to") else v
                          for k, v in batch.items()}
                 pred = model(batch)
                 preds.append(pred.cpu().numpy())
@@ -156,7 +158,8 @@ def train_variant(model, train_loader, val_loader, cfg, device, n_epochs=100):
     preds, gts = [], []
     with torch.no_grad():
         for batch in val_loader:
-            batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v.to(device) if hasattr(v, "to") else v
+            batch = {k: v.to(device) if isinstance(v, torch.Tensor) else
+                     v.to(device) if hasattr(v, "to") else v
                      for k, v in batch.items()}
             pred = model(batch)
             preds.append(pred.cpu().numpy())
