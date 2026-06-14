@@ -22,11 +22,29 @@ import torch
 import torch.nn as nn
 import yaml
 from torch.utils.data import DataLoader
+try:
+    from torch_geometric.loader import DataLoader as PyGDataLoader
+except ImportError:
+    PyGDataLoader = None
 
 from .train_utils import (
     set_seed, save_checkpoint, load_checkpoint,
     MetricTracker, rmse, mae, r2_score, spearman,
 )
+
+
+def _build_ckpt_meta(model_type, fold, epoch, val_rmse, cfg, extra=None):
+    """Build the standard metadata dict stored in every checkpoint."""
+    meta = {
+        "model_type": model_type,
+        "fold": fold,
+        "epoch": epoch,
+        "val_rmse": val_rmse,
+        "config": cfg,
+    }
+    if extra:
+        meta.update(extra)
+    return meta
 
 
 # ----------------------------------------------------------------------------
@@ -98,8 +116,15 @@ def train_tabular(model, X_train, y_train, X_val, y_val, cfg, model_type, device
 # Graph trainer (PyTorch models)
 # ----------------------------------------------------------------------------
 def train_graph(model, train_loader, val_loader, cfg, device, model_type="polychain",
-                cst_mean=None, cst_std=None, cst_dim=33):
-    """Train a PyTorch graph model."""
+                cst_mean=None, cst_std=None, cst_dim=33,
+                ckpt_dir=None, fold=0, person="anon", full_cfg=None,
+                model_ckpt_cfg=None):
+    """Train a PyTorch graph model.
+
+    Saves two checkpoints when ckpt_dir is provided:
+        - {ckpt_dir}/{person}_{model_type}_fold{fold}_best.pt   (best val_rmse)
+        - {ckpt_dir}/{person}_{model_type}_fold{fold}_final.pt  (last epoch)
+    """
     epochs = cfg.get("epochs", 200)
     lr = cfg.get("lr", 1e-4)
     weight_decay = cfg.get("weight_decay", 1e-5)
@@ -113,6 +138,28 @@ def train_graph(model, train_loader, val_loader, cfg, device, model_type="polych
     best_state = None
     patience = cfg.get("early_stopping", {}).get("patience", 30)
     bad = 0
+
+    # Checkpoint helpers
+    ckpt_dir = Path(ckpt_dir) if ckpt_dir else None
+    if ckpt_dir:
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_tag = f"{person}_{model_type}_fold{fold}"
+
+    def _save(state_dict, epoch, val_rmse, tag):
+        if ckpt_dir is None:
+            return
+        extra = {"model_state": state_dict}
+        if cst_mean is not None:
+            extra["cst_mean"] = cst_mean.tolist() if hasattr(cst_mean, "tolist") else list(cst_mean)
+        if cst_std is not None:
+            extra["cst_std"] = cst_std.tolist() if hasattr(cst_std, "tolist") else list(cst_std)
+        # Use model_ckpt_cfg for predictor-compatible config, fall back to full_cfg
+        ckpt_cfg = model_ckpt_cfg if model_ckpt_cfg is not None else (full_cfg or cfg)
+        meta = _build_ckpt_meta(model_type, fold, epoch, val_rmse,
+                                ckpt_cfg, extra=extra)
+        path = ckpt_dir / f"{ckpt_tag}_{tag}.pt"
+        save_checkpoint(meta, path)
+        print(f"  Checkpoint saved -> {path}")
 
     for epoch in range(1, epochs + 1):
         model.train()
@@ -154,11 +201,17 @@ def train_graph(model, train_loader, val_loader, cfg, device, model_type="polych
         if val_rmse < best_val_rmse:
             best_val_rmse = val_rmse
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+            # Save best checkpoint
+            _save(best_state, epoch, val_rmse, "best")
             bad = 0
         else:
             bad += 1
             if bad >= patience:
                 break
+
+    # Save final checkpoint (last epoch state)
+    final_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+    _save(final_state, epoch, val_rmse, "final")
 
     if best_state is not None:
         model.load_state_dict(best_state)
@@ -210,6 +263,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() and
                           cfg.get("device", {}).get("use_cuda", True) else "cpu")
     target = cfg["target"]["column"]
+    ckpt_dir = Path(cfg["paths"].get("checkpoints_dir", "outputs/checkpoints/"))
 
     # Load features and splits
     data_dir = Path(cfg["paths"]["data_dir"])
@@ -233,6 +287,23 @@ def main():
         y_va = va_df[target].values
         model = build_model(args.model_type, model_cfg, n_features=len(feature_cols))[0]
         pred_va = train_tabular(model, X_tr, y_tr, X_va, y_va, model_cfg, args.model_type, device)
+        # Save sklearn-style model checkpoint
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        ckpt_tag = f"{args.person}_{args.model_type}_fold{args.fold}"
+        best_path = ckpt_dir / f"{ckpt_tag}_best.pt"
+        final_path = ckpt_dir / f"{ckpt_tag}_final.pt"
+        ckpt_payload = {
+            "model_state": model,
+            "model_type": args.model_type,
+            "fold": args.fold,
+            "epoch": 0,
+            "val_rmse": rmse(y_va, pred_va),
+            "config": model_cfg,
+            "feature_cols": feature_cols,
+        }
+        save_checkpoint(ckpt_payload, best_path)
+        save_checkpoint(ckpt_payload, final_path)
+        print(f"  Checkpoint saved -> {best_path}")
     elif args.model_type in ("mlp",):
         from models.mlp import FingerprintMLP
         X_tr = tr_df[feature_cols].values.astype(np.float32)
@@ -256,6 +327,22 @@ def main():
         model.eval()
         with torch.no_grad():
             pred_va = model(torch.from_numpy(X_va).to(device)).cpu().numpy()
+        # Save MLP checkpoint
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        ckpt_tag = f"{args.person}_{args.model_type}_fold{args.fold}"
+        best_path = ckpt_dir / f"{ckpt_tag}_best.pt"
+        final_path = ckpt_dir / f"{ckpt_tag}_final.pt"
+        ckpt_payload = {
+            "model_state": model.state_dict(),
+            "model_type": args.model_type,
+            "fold": args.fold,
+            "epoch": 100,
+            "val_rmse": rmse(y_va, pred_va),
+            "config": {"in_dim": X_tr.shape[1], "out_dim": 1, **model_cfg},
+        }
+        save_checkpoint(ckpt_payload, best_path)
+        save_checkpoint(ckpt_payload, final_path)
+        print(f"  Checkpoint saved -> {best_path}")
     elif args.model_type == "polychain":
         from features.graph_utils import build_multiscale
         from models.polychain.cst import compute_cst_batch
@@ -298,8 +385,21 @@ def main():
         model.cst_norm.mean.data = torch.tensor(cst_mean, dtype=torch.float).to(device)
         model.cst_norm.std.data = torch.tensor(cst_std, dtype=torch.float).to(device)
 
+        # Build model-specific config for checkpoint (predictor.py needs in_atom_dim/in_edge_dim)
+        model_ckpt_cfg = {
+            "in_atom_dim": in_dim,
+            "in_edge_dim": edge_dim,
+            "hidden_dim": model_cfg.get("hidden_dim", 256),
+            "n_backbone_layers": model_cfg.get("n_backbone_layers", 4),
+            "n_hamf_layers": model_cfg.get("n_hamf_layers", 2),
+        }
+
         model, best_val_rmse = train_graph(model, train_loader, val_loader,
-                                            model_cfg, device, model_type="polychain")
+                                            model_cfg, device, model_type="polychain",
+                                            cst_mean=cst_mean, cst_std=cst_std,
+                                            ckpt_dir=ckpt_dir, fold=args.fold,
+                                            person=args.person, full_cfg=cfg,
+                                            model_ckpt_cfg=model_ckpt_cfg)
         model.eval()
         preds = []
         with torch.no_grad():
@@ -321,13 +421,24 @@ def main():
         in_dim = train_graphs[0].x.size(1)
         edge_dim = train_graphs[0].edge_attr.size(1)
 
-        train_loader = DataLoader(train_graphs, batch_size=64, shuffle=True)
-        val_loader = DataLoader(val_graphs, batch_size=64, shuffle=False)
+        PyGDL = PyGDataLoader if PyGDataLoader is not None else DataLoader
+        train_loader = PyGDL(train_graphs, batch_size=64, shuffle=True)
+        val_loader = PyGDL(val_graphs, batch_size=64, shuffle=False)
 
         model, _ = build_model(args.model_type, model_cfg, in_dim=in_dim, edge_dim=edge_dim)
         model = model.to(device)
+        # Build model-specific config for checkpoint
+        model_ckpt_cfg = {
+            "in_atom_dim": in_dim,
+            "in_edge_dim": edge_dim,
+            "hidden_dim": model_cfg.get("hidden_dim", 128),
+            "n_layers": model_cfg.get("n_layers", 3),
+        }
         model, best_val_rmse = train_graph(model, train_loader, val_loader,
-                                            model_cfg, device, model_type=args.model_type)
+                                            model_cfg, device, model_type=args.model_type,
+                                            ckpt_dir=ckpt_dir, fold=args.fold,
+                                            person=args.person, full_cfg=cfg,
+                                            model_ckpt_cfg=model_ckpt_cfg)
         model.eval()
         preds, gts = [], []
         with torch.no_grad():
@@ -356,7 +467,7 @@ def main():
         pickle.dump({"val_idx": val_idx, "pred": pred_va, "y": y_va,
                      "metrics": metrics, "model_type": args.model_type,
                      "fold": args.fold, "person": args.person}, f)
-    print(f"Saved predictions → {out_file}")
+    print(f"Saved predictions -> {out_file}")
 
 
 if __name__ == "__main__":

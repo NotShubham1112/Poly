@@ -76,14 +76,21 @@ BOND_TYPES = [
     Chem.rdchem.BondType.AROMATIC,
 ]
 
+# Bond feature dimension: one-hot(5) + [conjugated, in_ring, is_boundary](3) = 8
+BOND_FEAT_DIM = len(BOND_TYPES) + 1 + 3  # 8
+
 
 def bond_features(bond: Chem.rdchem.Bond, is_boundary: bool = False) -> list[int | float]:
     """Featurize a single bond, with an extra flag for *-boundary bonds."""
     bt_idx = BOND_TYPES.index(bond.GetBondType()) if bond.GetBondType() in BOND_TYPES else 3
-    return (
+    feat = (
         _onek(bt_idx, BOND_TYPES)
         + [int(bond.GetIsConjugated()), int(bond.IsInRing()), int(is_boundary)]
     )
+    assert len(feat) == BOND_FEAT_DIM, (
+        f"bond_features returned {len(feat)} dims, expected {BOND_FEAT_DIM}"
+    )
+    return feat
 
 
 # ----------------------------------------------------------------------------
@@ -122,6 +129,10 @@ def smiles_to_graph(smiles: str, y: Optional[float] = None) -> Optional[Data]:
 
     edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous() if edges else torch.zeros((2, 0), dtype=torch.long)
     edge_attr = torch.tensor(edge_attrs, dtype=torch.float) if edge_attrs else torch.zeros((0, len(bond_features(mol.GetBonds()[0], False))), dtype=torch.float)
+
+    assert edge_attr.size(1) == BOND_FEAT_DIM, (
+        f"smiles_to_graph edge_attr dim {edge_attr.size(1)} != {BOND_FEAT_DIM}"
+    )
 
     data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
     if y is not None:
@@ -215,7 +226,11 @@ def kmer_graph(smiles: str, k: int = 2, y: Optional[float] = None) -> Optional[D
         edge_attrs.append(bf)
 
     edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous() if edges else torch.zeros((2, 0), dtype=torch.long)
-    edge_attr = torch.tensor(edge_attrs, dtype=torch.float) if edge_attrs else torch.zeros((0, 6), dtype=torch.float)
+    edge_attr = torch.tensor(edge_attrs, dtype=torch.float) if edge_attrs else torch.zeros((0, BOND_FEAT_DIM), dtype=torch.float)
+
+    assert edge_attr.size(1) == BOND_FEAT_DIM, (
+        f"kmer_graph edge_attr dim {edge_attr.size(1)} != {BOND_FEAT_DIM}"
+    )
 
     data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
     if y is not None:
@@ -245,7 +260,11 @@ def periodic_graph(smiles: str, k: int = 1, y: Optional[float] = None) -> Option
                             dtype=torch.long)
     km.edge_index = torch.cat([km.edge_index, new_edge], dim=1)
 
-    new_attr = torch.tensor([[0, 0, 0, 0, 0, 1]] * 2, dtype=torch.float)  # is_boundary = True
+    # UNK bond type (one-hot [0,0,0,0,1]), not conjugated, not in ring, is_boundary=True
+    new_attr = torch.tensor([[0, 0, 0, 0, 1, 0, 0, 1]] * 2, dtype=torch.float)
     km.edge_attr = torch.cat([km.edge_attr, new_attr], dim=0)
+    assert km.edge_attr.size(1) == BOND_FEAT_DIM, (
+        f"periodic_graph edge_attr dim {km.edge_attr.size(1)} != {BOND_FEAT_DIM}"
+    )
 
     return km

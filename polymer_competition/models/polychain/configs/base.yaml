@@ -4,7 +4,7 @@
 model:
   name: "polychain"
   in_atom_dim: 60          # see features.graphs.atom_features
-  in_edge_dim: 6           # see features.graphs.bond_features
+  in_edge_dim: 8           # see features.graphs.bond_features (BOND_FEAT_DIM)
   hidden_dim: 256
   n_backbone_layers: 4
   n_hamf_layers: 2

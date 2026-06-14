@@ -38,7 +38,7 @@ class PolyChain(nn.Module):
     hidden_dim   : backbone / HAMF hidden dim (default 256)
     n_backbone_layers : number of GIN message-passing layers (default 4)
     n_hamf_layers     : number of HAMF blocks (default 2)
-    cst_dim      : dim of raw CST features (default 33, see cst.py)
+    cst_dim      : dim of raw CST features (default 32, see cst.py)
     cst_mean / cst_std : calibration stats for CST normalization
     out_dim      : regression output dim (default 1)
     dropout      : dropout in backbone + HAMF
@@ -50,7 +50,7 @@ class PolyChain(nn.Module):
                  hidden_dim: int = 256,
                  n_backbone_layers: int = 4,
                  n_hamf_layers: int = 2,
-                 cst_dim: int = 33,
+                 cst_dim: int = 32,
                  cst_mean: Optional[list[float]] = None,
                  cst_std: Optional[list[float]] = None,
                  out_dim: int = 1,

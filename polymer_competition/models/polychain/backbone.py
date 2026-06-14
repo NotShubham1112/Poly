@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GINConv, global_add_pool
+from torch_geometric.utils import scatter
 
 
 # ----------------------------------------------------------------------------
@@ -36,8 +37,7 @@ class GINEConv(nn.Module):
         msg_in = torch.cat([x[col], edge_attr], dim=-1) if edge_attr.numel() > 0 else x[col]
         msg = self.mlp(msg_in)
         # Aggregate
-        from torch_scatter import scatter_add
-        agg = scatter_add(msg, row, dim=0, dim_size=x.size(0))
+        agg = scatter(msg, row, dim=0, dim_size=x.size(0), reduce='add')
         out = (1 + self.eps) * x + agg
         out = F.relu(self.lin(out))
         return out
@@ -96,8 +96,7 @@ class GINBackbone(nn.Module):
             x = F.dropout(F.relu(x), p=self.dropout, training=self.training)
 
             # Update virtual state: aggregate, transform
-            from torch_scatter import scatter_add
-            agg = scatter_add(x, batch, dim=0)
+            agg = scatter(x, batch, dim=0, reduce='add')
             virtual_state = v_mlp(agg) + virtual_state
 
         g = global_add_pool(x, batch)
