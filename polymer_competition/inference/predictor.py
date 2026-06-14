@@ -11,11 +11,16 @@ Usage:
 """
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
 from typing import Iterable
 
 import numpy as np
 import torch
+
+os.environ["RDKIT_SKIP_VALIDATION_WARNINGS"] = "1"
+logging.getLogger("rdkit").setLevel(logging.ERROR)
 
 from features.graph_utils import build_multiscale, collate_multiscale
 from models.polychain import PolyChain

@@ -13,11 +13,16 @@ The SMILES is assumed to use '*' for connection points.
 """
 from __future__ import annotations
 
+import logging
+import os
 from typing import Optional
 
 import numpy as np
 import torch
 from rdkit import Chem
+
+os.environ["RDKIT_SKIP_VALIDATION_WARNINGS"] = "1"
+logging.getLogger("rdkit").setLevel(logging.ERROR)
 from torch_geometric.data import Data
 
 
