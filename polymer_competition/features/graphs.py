@@ -133,7 +133,7 @@ def smiles_to_graph(smiles: str, y: Optional[float] = None) -> Optional[Data]:
         edge_attrs.append(bf)
 
     edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous() if edges else torch.zeros((2, 0), dtype=torch.long)
-    edge_attr = torch.tensor(edge_attrs, dtype=torch.float) if edge_attrs else torch.zeros((0, len(bond_features(mol.GetBonds()[0], False))), dtype=torch.float)
+    edge_attr = torch.tensor(edge_attrs, dtype=torch.float) if edge_attrs else torch.zeros((0, BOND_FEAT_DIM), dtype=torch.float)
 
     assert edge_attr.size(1) == BOND_FEAT_DIM, (
         f"smiles_to_graph edge_attr dim {edge_attr.size(1)} != {BOND_FEAT_DIM}"

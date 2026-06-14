@@ -12,6 +12,9 @@ class SELFIESMask:
         self.eos_id = tokenizer.eos_token_id
         self.mask_id = tokenizer.mask_token_id
 
+    def __call__(self, logits, prefix_tokens):
+        return self.apply(logits, prefix_tokens)
+
     def apply(
         self, logits: torch.Tensor, prefix_tokens: list[int]
     ) -> torch.Tensor:

@@ -31,6 +31,8 @@ def save_checkpoint(state: dict, path: str | Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     torch.save(state, tmp)
+    if path.exists():
+        path.unlink()
     tmp.rename(path)
 
 

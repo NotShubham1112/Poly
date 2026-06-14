@@ -151,7 +151,7 @@ class PolymerGenerator:
                 top_p=p,
                 graph_emb=graph_emb,
                 property_cond=batch_prop,
-                mask_fn=self.mask_fn.apply,
+                mask_fn=self.mask_fn,
                 eos_token_id=self.tokenizer.eos_token_id,
             )
 
