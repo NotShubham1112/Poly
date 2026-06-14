@@ -32,6 +32,8 @@ class PolymerPredictor:
 
     def __init__(self, checkpoint_path: str | Path, device: str = "cpu"):
         self.device = torch.device(device)
+        self.target_mean: float | None = None
+        self.target_std: float | None = None
         self.model = self._load_model(checkpoint_path)
 
     def _load_model(self, path: str | Path) -> PolyChain:
@@ -46,10 +48,12 @@ class PolymerPredictor:
             dropout=0.0,
         )
         model.load_state_dict(ckpt["model_state"])
-        # Inject CST calibration
         if "cst_mean" in ckpt and "cst_std" in ckpt:
             model.cst_norm.mean.data = torch.tensor(ckpt["cst_mean"], dtype=torch.float)
             model.cst_norm.std.data = torch.tensor(ckpt["cst_std"], dtype=torch.float)
+        if "target_mean" in ckpt:
+            self.target_mean = ckpt["target_mean"]
+            self.target_std = ckpt.get("target_std", None)
         model.to(self.device).eval()
         return model
 
@@ -66,5 +70,8 @@ class PolymerPredictor:
         batch = {k: (v.to(self.device) if isinstance(v, torch.Tensor) else
                      v.to(self.device) if hasattr(v, "to") else v)
                  for k, v in batch.items()}
-        out = self.model(batch).cpu().numpy()
+        out = self.model(batch).cpu().numpy().ravel()
+        if self.target_mean is not None:
+            out = out * self.target_std + self.target_mean if self.target_std else out + self.target_mean
+        out = np.clip(out, -100.0, 100.0)
         return out

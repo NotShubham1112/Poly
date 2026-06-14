@@ -192,6 +192,7 @@ class GeneratorDecoder(nn.Module):
         x = token_emb + pos_emb
 
         if property_cond is not None:
+            property_cond = property_cond.view(-1)
             prop_emb = self.property_proj(property_cond.unsqueeze(-1).float())
             x = x + prop_emb.unsqueeze(1)
 
@@ -230,6 +231,7 @@ class GeneratorDecoder(nn.Module):
         batch_size = prefix.size(0)
         device = prefix.device
         tokens = prefix.clone()
+        was_training = self.training
 
         for _ in range(max_len - prefix.size(1)):
             logits, _ = self.forward(
@@ -274,6 +276,9 @@ class GeneratorDecoder(nn.Module):
         pred_property = self.property_head(cls_hidden).squeeze(-1)
 
         log_probs = self._compute_log_probs(final_logits, tokens)
+
+        if was_training:
+            self.train()
 
         return {
             "tokens": tokens,

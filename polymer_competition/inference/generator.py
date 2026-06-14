@@ -128,9 +128,8 @@ class PolymerGenerator:
 
         results = []
         n_remaining = n_samples
-        n_batches = (n_samples + batch_size - 1) // batch_size
 
-        for batch_idx in range(n_batches):
+        while n_remaining > 0:
             current_bs = min(batch_size, n_remaining)
             prefix = torch.full(
                 (current_bs, 1),
@@ -158,7 +157,10 @@ class PolymerGenerator:
 
             tokens = outputs["tokens"].cpu().tolist()
             log_probs = outputs["log_probs"].cpu().tolist()
-            pred_properties = outputs["pred_property"].cpu().tolist()
+            pred_norm = outputs["pred_property"].cpu().numpy()
+            if self.prop_scaler is not None and self.prop_scaler.fitted:
+                pred_norm = self.prop_scaler.inverse(pred_norm)
+            pred_properties = pred_norm.tolist()
 
             for i in range(current_bs):
                 smi = self.tokenizer.decode(tokens[i])

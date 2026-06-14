@@ -26,9 +26,12 @@ def set_seed(seed: int = 42, deterministic: bool = True) -> None:
 
 
 def save_checkpoint(state: dict, path: str | Path) -> None:
-    """Save a training checkpoint."""
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    torch.save(state, path)
+    """Save a training checkpoint atomically."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    torch.save(state, tmp)
+    tmp.rename(path)
 
 
 def load_checkpoint(path: str | Path, map_location: str = "cpu") -> dict:
@@ -46,14 +49,14 @@ class MetricTracker:
 
     def log(self, epoch: int, metrics: dict) -> None:
         self.history.append({"epoch": epoch, **metrics})
-        # Append to CSV
         csv_path = self.save_dir / "metrics.csv"
         is_new = not csv_path.exists()
         import pandas as pd
-        df = pd.DataFrame(self.history)
-        df.to_csv(csv_path, index=False, mode="w" if is_new else "a",
-                  header=is_new, index_label="epoch")
-        # Write JSON snapshot
+        record = {"epoch": epoch, **metrics}
+        pd.DataFrame([record]).to_csv(
+            csv_path, index=False, mode="a" if not is_new else "w",
+            header=is_new,
+        )
         with open(self.save_dir / "metrics.json", "w") as f:
             json.dump(self.history, f, indent=2, default=str)
 

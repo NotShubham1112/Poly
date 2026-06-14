@@ -336,6 +336,7 @@ def sample_generative_metrics(
             temperature=cfg["temperature"],
             top_k=cfg["top_k"],
             top_p=cfg["top_p"],
+            property_cond=torch.zeros(bs, device=device),
             eos_token_id=tokenizer.eos_token_id,
         )
         for tokens_i in out["tokens"].cpu().tolist():
@@ -433,15 +434,20 @@ def main():
         list(model.parameters()) + (list(graph_encoder.parameters()) if graph_encoder else []),
         lr=args.lr, weight_decay=1e-5,
     )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    total_epochs = args.epochs * 6  # accumulate across all 6 phases
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_epochs)
 
     start_epoch = 1
     best_val_loss = float("inf")
     ckpt_tag = f"{args.person}_generator"
 
     if args.resume:
-        best_path = ckpt_dir / f"{ckpt_tag}_best.pt"
-        if best_path.exists():
+        resume_order = [
+            ckpt_dir / f"{ckpt_tag}_recovery.pt",
+            ckpt_dir / f"{ckpt_tag}_best.pt",
+        ]
+        best_path = next((p for p in resume_order if p.exists()), None)
+        if best_path is not None:
             ckpt_data = load_checkpoint(best_path)
             model.load_state_dict(ckpt_data["model_state"])
             if graph_encoder is not None and "graph_state" in ckpt_data:

@@ -203,9 +203,10 @@ def _build_kmer(mol, smiles, k, y, star_atoms):
     star_right = rw.AddAtom(Chem.Atom(0))
 
     for rep in range(k - 1):
-        right_atom = max(local_map.values())
-        left_atom = min(local_map.values())
-        rw.AddBond(right_atom, left_atom, Chem.BondType.SINGLE)
+        right_atom = max(idx for r, o, idx in base_idx_map if r == rep)
+        left_atom = min(idx for r, o, idx in base_idx_map if r == rep + 1)
+        if not rw.GetBondBetweenAtoms(int(right_atom), int(left_atom)):
+            rw.AddBond(int(right_atom), int(left_atom), Chem.BondType.SINGLE)
 
     if base_idx_map:
         first_base = min(idx for _, _, idx in base_idx_map[:n_base])

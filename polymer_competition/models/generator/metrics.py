@@ -75,8 +75,8 @@ class GenerativeMetrics:
                     pass
         scaffold_diversity = len(scaffolds) / max(len(unique), 1)
 
-        property_ks = -1.0
-        property_mean_shift = -1.0
+        property_ks = None
+        property_mean_shift = None
         if generated_properties is not None and self.reference_properties is not None:
             gen_arr = np.asarray(generated_properties, dtype=np.float64)
             ref_arr = np.asarray(self.reference_properties, dtype=np.float64)

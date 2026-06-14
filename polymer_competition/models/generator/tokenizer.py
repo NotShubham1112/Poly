@@ -104,8 +104,8 @@ class SELFIESTokenizer:
                 break
             if tid == self._pad_token_id or tid == self._mask_token_id:
                 continue
-            token_str = self._inv_vocab.get(tid, "")
-            if token_str:
+            token_str = self._inv_vocab.get(tid)
+            if token_str is not None:
                 tokens.append(token_str)
         if not tokens:
             return ""

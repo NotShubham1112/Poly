@@ -27,10 +27,10 @@ class CurriculumScheduler:
     def __init__(self, df: pd.DataFrame, n_phases: int = 6):
         self.df = df.reset_index(drop=True)
         self.n_phases = n_phases
-        self._descriptor_cache: dict[int, dict[str, Any]] = {}
+        self._descriptor_cache: dict[str, dict[str, Any]] = {}
 
     def get_descriptors(self, smiles: str) -> dict[str, Any]:
-        cached = self._descriptor_cache.get(id(smiles))
+        cached = self._descriptor_cache.get(smiles)
         if cached is not None:
             return cached
 
@@ -43,7 +43,7 @@ class CurriculumScheduler:
                 "branching_index": 0,
                 "is_polymer": False,
             }
-            self._descriptor_cache[id(smiles)] = result
+            self._descriptor_cache[smiles] = result
             return result
 
         ring_info = mol.GetRingInfo()
@@ -71,7 +71,7 @@ class CurriculumScheduler:
             "branching_index": branching_index,
             "is_polymer": is_polymer,
         }
-        self._descriptor_cache[id(smiles)] = result
+        self._descriptor_cache[smiles] = result
         return result
 
     def _compute_descriptors_batch(self) -> pd.DataFrame:
