@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import random
 from pathlib import Path
+import shutil
 
 import numpy as np
 import pandas as pd
@@ -30,9 +32,9 @@ from training.train_utils import (
 )
 
 DECODE_CONFIG = {
-    "temperature": 1.0,
-    "top_k": 40,
-    "top_p": 0.9,
+    "temperature": 1.1,
+    "top_k": 80,
+    "top_p": 0.95,
     "max_len": 80,
 }
 
@@ -113,6 +115,24 @@ class SMILESDataset(Dataset):
                     "target_ids": fallback.clone(),
                     "smiles": "CCO",
                 })
+
+    def complexity_weights(self, weight_power: float = 0.1) -> list[float]:
+        os.environ["RDKIT_SKIP_VALIDATION_WARNINGS"] = "1"
+        from rdkit import Chem
+        weights = []
+        epsilon = 1.0
+        for rec in self.records:
+            smi = rec["smiles"]
+            mol = Chem.MolFromSmiles(smi)
+            if mol is None:
+                weights.append(epsilon)
+                continue
+            n_heavy = mol.GetNumHeavyAtoms()
+            n_rings = mol.GetRingInfo().NumRings()
+            n_hetero = sum(1 for a in mol.GetAtoms() if a.GetAtomicNum() not in (0, 6))
+            score = (1 + n_heavy) * (1 + n_rings) * (1 + n_hetero)
+            weights.append(score ** weight_power)
+        return weights
 
     def __len__(self):
         return len(self.records)
@@ -205,6 +225,7 @@ def train_epoch(
             targets=targets,
             pred_property=pred_property,
             true_property=prop_cond,
+            decoder_hidden=decoder_hidden,
         )
 
         if use_free_run:
@@ -289,6 +310,7 @@ def validate_epoch(
             targets=targets,
             pred_property=pred_property,
             true_property=prop_cond,
+            decoder_hidden=decoder_hidden,
         )
 
         total_loss += loss.item()
@@ -317,6 +339,7 @@ def sample_generative_metrics(
     n_samples: int,
     device: torch.device,
     decode_cfg: dict | None = None,
+    mask_fn: callable | None = None,
 ) -> dict:
     model.eval()
     if graph_encoder is not None:
@@ -338,6 +361,7 @@ def sample_generative_metrics(
             top_p=cfg["top_p"],
             property_cond=torch.zeros(bs, device=device),
             eos_token_id=tokenizer.eos_token_id,
+            mask_fn=mask_fn,
         )
         for tokens_i in out["tokens"].cpu().tolist():
             smi = tokenizer.decode(tokens_i)
@@ -366,6 +390,18 @@ def main():
     parser.add_argument("--n_layer", type=int, default=6)
     parser.add_argument("--auto_save_every", type=int, default=5,
                         help="Save recovery checkpoint every N epochs")
+    parser.add_argument("--entropy_weight", type=float, default=0.02,
+                        help="Entropy regularization weight (promotes diversity)")
+    parser.add_argument("--diversity_weight", type=float, default=0.01,
+                        help="Batch diversity penalty weight (repels latents)")
+    parser.add_argument("--complexity_weight", type=float, default=0.1,
+                        help="Curriculum weight for complex molecules in loss")
+    parser.add_argument("--temperature", type=float, default=1.0,
+                        help="Sampling temperature during training evaluation")
+    parser.add_argument("--top_k", type=int, default=80,
+                        help="Top-k sampling during training evaluation")
+    parser.add_argument("--top_p", type=float, default=0.95,
+                        help="Top-p sampling during training evaluation")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -423,11 +459,20 @@ def main():
         property_weight=0.5,
         label_smoothing=0.0,
         ignore_index=tokenizer.pad_token_id,
+        entropy_weight=args.entropy_weight,
+        diversity_weight=args.diversity_weight,
     )
 
     mask_fn = SELFIESMask(tokenizer)
     validator = MoleculeValidator()
     gen_metrics_tracker = GenerativeMetrics(reference_smiles=all_smiles)
+
+    decode_cfg = {
+        "temperature": args.temperature,
+        "top_k": args.top_k,
+        "top_p": args.top_p,
+        "max_len": 80,
+    }
     curriculum = CurriculumScheduler(df) if args.curriculum else None
 
     optimizer = torch.optim.AdamW(
@@ -520,8 +565,18 @@ def main():
             print(f"  Skipping phase {phase}: no valid training samples after filtering")
             continue
 
+        if args.complexity_weight > 0:
+            weights = train_dataset.complexity_weights(args.complexity_weight)
+            sampler = torch.utils.data.WeightedRandomSampler(
+                weights, len(train_dataset), replacement=True,
+            )
+            shuffle = False
+        else:
+            sampler = None
+            shuffle = True
         train_loader = DataLoader(
-            train_dataset, batch_size=args.batch_size, shuffle=True,
+            train_dataset, batch_size=args.batch_size,
+            shuffle=shuffle, sampler=sampler,
             collate_fn=collate_generator,
         )
         val_loader = DataLoader(
@@ -563,6 +618,7 @@ def main():
                 gen_metrics = sample_generative_metrics(
                     model, graph_encoder, tokenizer, gen_metrics_tracker,
                     n_samples=50, device=device,
+                    decode_cfg=decode_cfg, mask_fn=mask_fn,
                 )
                 metrics["validity"] = gen_metrics["validity"]
                 metrics["uniqueness"] = gen_metrics["uniqueness"]

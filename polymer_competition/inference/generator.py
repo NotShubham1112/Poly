@@ -32,9 +32,9 @@ from models.generator import (
 )
 
 DECODE_CONFIG = {
-    "temperature": 1.0,
-    "top_k": 40,
-    "top_p": 0.9,
+    "temperature": 1.2,
+    "top_k": 100,
+    "top_p": 0.97,
     "max_length": 256,
 }
 
