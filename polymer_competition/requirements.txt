@@ -17,7 +17,7 @@ torch-geometric>=2.4.0
 # torch-sparse>=0.6.18
 
 # Cheminformatics
-rdkit>=2023.9.1
+rdkit
 
 # Pretrained chemistry language models
 transformers>=4.35.0
