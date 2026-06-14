@@ -273,6 +273,10 @@ def main():
     parser.add_argument("--ckpt", default=None)
     parser.add_argument("--resume", action="store_true",
                         help="Resume training from the latest checkpoint.")
+    parser.add_argument("--max_samples", type=int, default=None,
+                        help="Limit to N samples (for smoke testing).")
+    parser.add_argument("--epochs", type=int, default=None,
+                        help="Override number of training epochs.")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -300,6 +304,18 @@ def main():
     train_idx, val_idx = fold["train"], fold["val"]
     tr_df = train.iloc[train_idx].reset_index(drop=True)
     va_df = train.iloc[val_idx].reset_index(drop=True)
+
+    # Apply max_samples limit for smoke testing
+    if args.max_samples:
+        n = min(args.max_samples, len(tr_df))
+        tr_df = tr_df.iloc[:n].reset_index(drop=True)
+        n_val = min(n // 4, len(va_df))
+        va_df = va_df.iloc[:n_val].reset_index(drop=True)
+        print(f"Limited to {len(tr_df)} train / {len(va_df)} val samples")
+
+    # Override epochs if specified
+    if args.epochs:
+        model_cfg["epochs"] = args.epochs
 
     # Build model
     feature_cols = [c for c in train.columns
