@@ -123,14 +123,16 @@ MODELS_NEED_SCALING = {"ridge", "mlp"}
 def train_graph(model, train_loader, val_loader, cfg, device, model_type="polychain",
                 cst_mean=None, cst_std=None, cst_dim=32,
                 ckpt_dir=None, fold=0, person="anon", full_cfg=None,
-                model_ckpt_cfg=None, resume=False):
+                model_ckpt_cfg=None, resume=False, auto_save_every=0):
     """Train a PyTorch graph model.
 
-    Saves two checkpoints when ckpt_dir is provided:
-        - {ckpt_dir}/{person}_{model_type}_fold{fold}_best.pt   (best val_rmse)
-        - {ckpt_dir}/{person}_{model_type}_fold{fold}_final.pt  (last epoch)
+    Saves checkpoints when ckpt_dir is provided:
+        - {tag}_best.pt      (best val_rmse, model only)
+        - {tag}_final.pt     (last epoch, model only)
+        - {tag}_recovery.pt  (every N epochs, includes opt+sched state)
 
-    If resume=True, attempts to load the latest checkpoint and continue training.
+    If resume=True, loads recovery checkpoint (preferred) or final checkpoint
+    and restores model + optimizer + scheduler state.
     """
     epochs = cfg.get("epochs", 200)
     lr = cfg.get("lr", 1e-4)
@@ -147,39 +149,49 @@ def train_graph(model, train_loader, val_loader, cfg, device, model_type="polych
     bad = 0
     start_epoch = 1
 
-    # Auto-resume: load latest checkpoint if resume=True
-    if resume and ckpt_dir:
-        ckpt_tag = f"{person}_{model_type}_fold{fold}"
-        final_path = ckpt_dir / f"{ckpt_tag}_final.pt"
-        if final_path.exists():
-            print(f"  Resuming from {final_path}")
-            ckpt_data = load_checkpoint(final_path)
-            if "model_state" in ckpt_data and model_type != "polychain":
-                model.load_state_dict(ckpt_data["model_state"])
-            elif "model_state" in ckpt_data:
-                model.load_state_dict(ckpt_data["model_state"])
-            start_epoch = ckpt_data.get("epoch", 0) + 1
-            best_val_rmse = ckpt_data.get("val_rmse", float("inf"))
-            print(f"  Resumed from epoch {start_epoch - 1}, best_val_rmse={best_val_rmse:.4f}")
-
-    # Checkpoint helpers
     ckpt_dir = Path(ckpt_dir) if ckpt_dir else None
     if ckpt_dir:
         ckpt_dir.mkdir(parents=True, exist_ok=True)
     ckpt_tag = f"{person}_{model_type}_fold{fold}"
 
-    def _save(state_dict, epoch, val_rmse, tag):
+    # Auto-resume: prefer recovery over final (recovery has opt+sched)
+    if resume and ckpt_dir:
+        resume_candidates = [
+            ckpt_dir / f"{ckpt_tag}_recovery.pt",
+            ckpt_dir / f"{ckpt_tag}_final.pt",
+        ]
+        resume_path = next((p for p in resume_candidates if p.exists()), None)
+        if resume_path is not None:
+            print(f"  Resuming from {resume_path}")
+            ckpt_data = load_checkpoint(resume_path)
+            if "model_state" in ckpt_data:
+                model.load_state_dict(ckpt_data["model_state"])
+            if "optimizer_state" in ckpt_data:
+                opt.load_state_dict(ckpt_data["optimizer_state"])
+            if "scheduler_state" in ckpt_data:
+                sched.load_state_dict(ckpt_data["scheduler_state"])
+            start_epoch = ckpt_data.get("epoch", 0) + 1
+            best_val_rmse = ckpt_data.get("val_rmse", float("inf"))
+            bad = ckpt_data.get("bad_epochs", 0)
+            print(f"  Resumed from epoch {start_epoch - 1}, "
+                  f"best_val_rmse={best_val_rmse:.4f}, bad_epochs={bad}")
+        else:
+            print("  No checkpoint found for resume. Starting from scratch.")
+
+    def _save_full(tag):
         if ckpt_dir is None:
             return
-        extra = {"model_state": state_dict}
+        extra = {"model_state": model.state_dict()}
+        if tag == "recovery":
+            extra["optimizer_state"] = opt.state_dict()
+            extra["scheduler_state"] = sched.state_dict()
+            extra["bad_epochs"] = bad
         if cst_mean is not None:
             extra["cst_mean"] = cst_mean.tolist() if hasattr(cst_mean, "tolist") else list(cst_mean)
         if cst_std is not None:
             extra["cst_std"] = cst_std.tolist() if hasattr(cst_std, "tolist") else list(cst_std)
-        # Use model_ckpt_cfg for predictor-compatible config, fall back to full_cfg
         ckpt_cfg = model_ckpt_cfg if model_ckpt_cfg is not None else (full_cfg or cfg)
-        meta = _build_ckpt_meta(model_type, fold, epoch, val_rmse,
-                                ckpt_cfg, extra=extra)
+        meta = _build_ckpt_meta(model_type, fold, epoch, val_rmse, ckpt_cfg, extra=extra)
         path = ckpt_dir / f"{ckpt_tag}_{tag}.pt"
         save_checkpoint(meta, path)
         print(f"  Checkpoint saved -> {path}")
@@ -203,6 +215,10 @@ def train_graph(model, train_loader, val_loader, cfg, device, model_type="polych
             opt.step()
         sched.step()
 
+        # Auto-save recovery checkpoint
+        if auto_save_every > 0 and epoch % auto_save_every == 0:
+            _save_full("recovery")
+
         # Validation
         model.eval()
         preds, gts = [], []
@@ -224,17 +240,15 @@ def train_graph(model, train_loader, val_loader, cfg, device, model_type="polych
         if val_rmse < best_val_rmse:
             best_val_rmse = val_rmse
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
-            # Save best checkpoint
-            _save(best_state, epoch, val_rmse, "best")
+            _save_full("best")
             bad = 0
         else:
             bad += 1
             if bad >= patience:
+                _save_full("final")
                 break
 
-    # Save final checkpoint (last epoch state)
-    final_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
-    _save(final_state, epoch, val_rmse, "final")
+    _save_full("final")
 
     if best_state is not None:
         model.load_state_dict(best_state)
@@ -277,6 +291,8 @@ def main():
                         help="Limit to N samples (for smoke testing).")
     parser.add_argument("--epochs", type=int, default=None,
                         help="Override number of training epochs.")
+    parser.add_argument("--auto_save_every", type=int, default=5,
+                        help="Save recovery checkpoint every N epochs (0 to disable)")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -488,7 +504,8 @@ def main():
                                             ckpt_dir=ckpt_dir, fold=args.fold,
                                             person=args.person, full_cfg=cfg,
                                             model_ckpt_cfg=model_ckpt_cfg,
-                                            resume=args.resume)
+                                            resume=args.resume,
+                                            auto_save_every=args.auto_save_every)
         model.eval()
         preds = []
         with torch.no_grad():
@@ -528,7 +545,8 @@ def main():
                                             ckpt_dir=ckpt_dir, fold=args.fold,
                                             person=args.person, full_cfg=cfg,
                                             model_ckpt_cfg=model_ckpt_cfg,
-                                            resume=args.resume)
+                                            resume=args.resume,
+                                            auto_save_every=args.auto_save_every)
         model.eval()
         preds, gts = [], []
         with torch.no_grad():
