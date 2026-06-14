@@ -158,16 +158,15 @@ def kmer_graph(smiles: str, k: int = 2, y: Optional[float] = None) -> Optional[D
     if mol is None:
         return None
 
-    # Identify * atoms
     star_atoms = [a.GetIdx() for a in mol.GetAtoms() if a.GetSymbol() == "*"]
     if len(star_atoms) < 2:
-        # Fall back to monomer graph if SMILES is not a polymer (no asterisks)
+        return smiles_to_graph(smiles, y=y)
+    if len(star_atoms) > 2:
         return smiles_to_graph(smiles, y=y)
 
     try:
         return _build_kmer(mol, smiles, k, y, star_atoms)
     except Exception:
-        # Fall back to monomer for problematic SMILES
         return smiles_to_graph(smiles, y=y)
 
 
