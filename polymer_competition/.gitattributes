@@ -1,0 +1,28 @@
+# Enforce LF line endings for all text files
+* text=auto eol=lf
+
+# Explicitly mark these files as text with LF
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.ipynb text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.sh text eol=lf
+
+# Binary files - do not modify
+*.pt binary
+*.pkl binary
+*.parquet binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary

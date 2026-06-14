@@ -80,7 +80,7 @@ def generate_splits(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "wb") as f:
         pickle.dump(splits, f)
-    print(f"Saved {n_folds}-fold splits → {output_path}")
+    print(f"Saved {n_folds}-fold splits -> {output_path}")
 
     # Summary
     for fold_id, idx in splits.items():

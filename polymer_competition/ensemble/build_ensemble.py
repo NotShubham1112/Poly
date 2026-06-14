@@ -131,7 +131,7 @@ def main():
         })
         sub_path = sub_dir / "submission.csv"
         submission.to_csv(sub_path, index=False)
-        print(f"  Submission saved → {sub_path}")
+        print(f"  Submission saved -> {sub_path}")
 
     # ------------------------------------------------------------------
     # Save model summary

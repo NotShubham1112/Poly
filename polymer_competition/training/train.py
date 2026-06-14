@@ -31,6 +31,7 @@ from .train_utils import (
     set_seed, save_checkpoint, load_checkpoint,
     MetricTracker, rmse, mae, r2_score, spearman,
 )
+from sklearn.preprocessing import StandardScaler
 
 
 def _build_ckpt_meta(model_type, fold, epoch, val_rmse, cfg, extra=None):
@@ -112,18 +113,24 @@ def train_tabular(model, X_train, y_train, X_val, y_val, cfg, model_type, device
     return pred_val
 
 
+# Models that require feature scaling (sensitive to feature magnitude)
+MODELS_NEED_SCALING = {"ridge", "mlp"}
+
+
 # ----------------------------------------------------------------------------
 # Graph trainer (PyTorch models)
 # ----------------------------------------------------------------------------
 def train_graph(model, train_loader, val_loader, cfg, device, model_type="polychain",
-                cst_mean=None, cst_std=None, cst_dim=33,
+                cst_mean=None, cst_std=None, cst_dim=32,
                 ckpt_dir=None, fold=0, person="anon", full_cfg=None,
-                model_ckpt_cfg=None):
+                model_ckpt_cfg=None, resume=False):
     """Train a PyTorch graph model.
 
     Saves two checkpoints when ckpt_dir is provided:
         - {ckpt_dir}/{person}_{model_type}_fold{fold}_best.pt   (best val_rmse)
         - {ckpt_dir}/{person}_{model_type}_fold{fold}_final.pt  (last epoch)
+
+    If resume=True, attempts to load the latest checkpoint and continue training.
     """
     epochs = cfg.get("epochs", 200)
     lr = cfg.get("lr", 1e-4)
@@ -138,6 +145,22 @@ def train_graph(model, train_loader, val_loader, cfg, device, model_type="polych
     best_state = None
     patience = cfg.get("early_stopping", {}).get("patience", 30)
     bad = 0
+    start_epoch = 1
+
+    # Auto-resume: load latest checkpoint if resume=True
+    if resume and ckpt_dir:
+        ckpt_tag = f"{person}_{model_type}_fold{fold}"
+        final_path = ckpt_dir / f"{ckpt_tag}_final.pt"
+        if final_path.exists():
+            print(f"  Resuming from {final_path}")
+            ckpt_data = load_checkpoint(final_path)
+            if "model_state" in ckpt_data and model_type != "polychain":
+                model.load_state_dict(ckpt_data["model_state"])
+            elif "model_state" in ckpt_data:
+                model.load_state_dict(ckpt_data["model_state"])
+            start_epoch = ckpt_data.get("epoch", 0) + 1
+            best_val_rmse = ckpt_data.get("val_rmse", float("inf"))
+            print(f"  Resumed from epoch {start_epoch - 1}, best_val_rmse={best_val_rmse:.4f}")
 
     # Checkpoint helpers
     ckpt_dir = Path(ckpt_dir) if ckpt_dir else None
@@ -161,7 +184,7 @@ def train_graph(model, train_loader, val_loader, cfg, device, model_type="polych
         save_checkpoint(meta, path)
         print(f"  Checkpoint saved -> {path}")
 
-    for epoch in range(1, epochs + 1):
+    for epoch in range(start_epoch, epochs + 1):
         model.train()
         for batch_dict in train_loader:
             opt.zero_grad()
@@ -248,6 +271,8 @@ def main():
     parser.add_argument("--person", default="anon",
                         help="Team member name (used in output filename).")
     parser.add_argument("--ckpt", default=None)
+    parser.add_argument("--resume", action="store_true",
+                        help="Resume training from the latest checkpoint.")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -285,6 +310,15 @@ def main():
         y_tr = tr_df[target].values
         X_va = va_df[feature_cols].values
         y_va = va_df[target].values
+
+        # Apply StandardScaler for linear models (Ridge)
+        scaler = None
+        if args.model_type in MODELS_NEED_SCALING:
+            from sklearn.preprocessing import StandardScaler
+            scaler = StandardScaler()
+            X_tr = scaler.fit_transform(X_tr)
+            X_va = scaler.transform(X_va)
+
         model = build_model(args.model_type, model_cfg, n_features=len(feature_cols))[0]
         pred_va = train_tabular(model, X_tr, y_tr, X_va, y_va, model_cfg, args.model_type, device)
         # Save sklearn-style model checkpoint
@@ -301,6 +335,8 @@ def main():
             "config": model_cfg,
             "feature_cols": feature_cols,
         }
+        if scaler is not None:
+            ckpt_payload["scaler"] = scaler
         save_checkpoint(ckpt_payload, best_path)
         save_checkpoint(ckpt_payload, final_path)
         print(f"  Checkpoint saved -> {best_path}")
@@ -310,10 +346,24 @@ def main():
         y_tr = tr_df[target].values.astype(np.float32)
         X_va = va_df[feature_cols].values.astype(np.float32)
         y_va = va_df[target].values.astype(np.float32)
+
+        # Apply StandardScaler for MLP
+        scaler = StandardScaler()
+        X_tr = scaler.fit_transform(X_tr).astype(np.float32)
+        X_va = scaler.transform(X_va).astype(np.float32)
+
         model = FingerprintMLP(in_dim=X_tr.shape[1])
-        opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
+        model = model.to(device)
+        opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-5)
+        sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=100)
         crit = nn.MSELoss()
-        for ep in range(100):
+
+        best_val_rmse = float("inf")
+        best_state = None
+        patience = 20
+        bad = 0
+
+        for ep in range(1, 101):
             model.train()
             idx = np.random.permutation(len(X_tr))
             for i in range(0, len(X_tr), 64):
@@ -321,12 +371,32 @@ def main():
                 xb = torch.from_numpy(X_tr[b]).to(device)
                 yb = torch.from_numpy(y_tr[b]).to(device)
                 opt.zero_grad()
-                pred = model(xb)
+                pred = model(xb).squeeze(-1)
                 loss = crit(pred, yb)
-                loss.backward(); opt.step()
+                loss.backward()
+                opt.step()
+            sched.step()
+
+            # Validation
+            model.eval()
+            with torch.no_grad():
+                pred_va = model(torch.from_numpy(X_va).to(device)).squeeze(-1).cpu().numpy()
+            val_rmse = float(np.sqrt(np.mean((y_va - pred_va) ** 2)))
+            if val_rmse < best_val_rmse:
+                best_val_rmse = val_rmse
+                best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+                bad = 0
+            else:
+                bad += 1
+                if bad >= patience:
+                    break
+
+        if best_state is not None:
+            model.load_state_dict(best_state)
         model.eval()
         with torch.no_grad():
-            pred_va = model(torch.from_numpy(X_va).to(device)).cpu().numpy()
+            pred_va = model(torch.from_numpy(X_va).to(device)).squeeze(-1).cpu().numpy()
+
         # Save MLP checkpoint
         ckpt_dir.mkdir(parents=True, exist_ok=True)
         ckpt_tag = f"{args.person}_{args.model_type}_fold{args.fold}"
@@ -336,9 +406,11 @@ def main():
             "model_state": model.state_dict(),
             "model_type": args.model_type,
             "fold": args.fold,
-            "epoch": 100,
-            "val_rmse": rmse(y_va, pred_va),
+            "epoch": ep,
+            "val_rmse": best_val_rmse,
             "config": {"in_dim": X_tr.shape[1], "out_dim": 1, **model_cfg},
+            "scaler_mean": scaler.mean_.tolist(),
+            "scaler_scale": scaler.scale_.tolist(),
         }
         save_checkpoint(ckpt_payload, best_path)
         save_checkpoint(ckpt_payload, final_path)
@@ -399,7 +471,8 @@ def main():
                                             cst_mean=cst_mean, cst_std=cst_std,
                                             ckpt_dir=ckpt_dir, fold=args.fold,
                                             person=args.person, full_cfg=cfg,
-                                            model_ckpt_cfg=model_ckpt_cfg)
+                                            model_ckpt_cfg=model_ckpt_cfg,
+                                            resume=args.resume)
         model.eval()
         preds = []
         with torch.no_grad():
@@ -438,7 +511,8 @@ def main():
                                             model_cfg, device, model_type=args.model_type,
                                             ckpt_dir=ckpt_dir, fold=args.fold,
                                             person=args.person, full_cfg=cfg,
-                                            model_ckpt_cfg=model_ckpt_cfg)
+                                            model_ckpt_cfg=model_ckpt_cfg,
+                                            resume=args.resume)
         model.eval()
         preds, gts = [], []
         with torch.no_grad():

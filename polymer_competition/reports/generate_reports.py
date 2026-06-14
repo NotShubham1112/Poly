@@ -93,7 +93,7 @@ def generate_shap_summary(pred_dir: Path, data_dir: Path, output_dir: Path,
         plt.tight_layout()
         plt.savefig(output_dir / "shap_summary.png", dpi=150, bbox_inches="tight")
         plt.close()
-        print(f"  SHAP summary → {output_dir / 'shap_summary.png'}")
+        print(f"  SHAP summary -> {output_dir / 'shap_summary.png'}")
     else:
         print(f"Using checkpoint: {xgb_ckpts[0]}")
         # Load the actual trained model
@@ -179,7 +179,7 @@ def generate_error_analysis(pred_dir: Path, output_dir: Path):
     plt.tight_layout()
     plt.savefig(output_dir / "error_analysis.png", dpi=150, bbox_inches="tight")
     plt.close()
-    print(f"  Error analysis → {output_dir / 'error_analysis.png'}")
+    print(f"  Error analysis -> {output_dir / 'error_analysis.png'}")
 
 
 def generate_model_summary(pred_dir: Path, output_dir: Path):
@@ -215,7 +215,7 @@ def generate_model_summary(pred_dir: Path, output_dir: Path):
 
     summary = pd.DataFrame(rows).sort_values("rmse")
     summary.to_csv(output_dir / "model_summary.csv", index=False)
-    print(f"  Model summary → {output_dir / 'model_summary.csv'}")
+    print(f"  Model summary -> {output_dir / 'model_summary.csv'}")
     print(summary.to_string(index=False))
 
 
