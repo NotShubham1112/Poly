@@ -1,8 +1,0 @@
-{
-  "run_id": "generate_1",
-  "timestamp": "2026-06-15T00:10:16.606406",
-  "data_path": "data\\train.csv",
-  "log_path": "outputs\\checkpoints\\generator_logs",
-  "n_samples": 902,
-  "n_valid_smiles": 902
-}
