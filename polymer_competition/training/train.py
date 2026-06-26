@@ -267,7 +267,10 @@ def move_to_device(batch_dict, device):
             # PyG Batch objects – use .to
             try:
                 out[k] = v.to(device)
-            except Exception:
+            except Exception as e:
+                import logging
+                log = logging.getLogger(__name__)
+                log.warning("Failed to move '%s' to device: %s", k, e)
                 out[k] = v
     return out
 
@@ -313,8 +316,14 @@ def main():
     # Load features and splits
     data_dir = Path(cfg["paths"]["data_dir"])
     train = pd.read_parquet(data_dir / "processed" / "train_features.parquet")
-    with open(data_dir / "splits.pkl", "rb") as f:
-        splits = pickle.load(f)
+    try:
+        with open(data_dir / "splits.pkl", "rb") as f:
+            splits = pickle.load(f)
+        print(f"Loaded {len(splits)} fold splits from {data_dir / 'splits.pkl'}")
+    except FileNotFoundError:
+        print(f"data/splits.pkl not found. Generating splits on-the-fly ...")
+        from features.build_features import make_splits as _make_splits
+        splits = _make_splits(train, n_folds=cfg["cv"]["n_folds"], seed=seed, target=target)
 
     fold = splits[args.fold]
     train_idx, val_idx = fold["train"], fold["val"]

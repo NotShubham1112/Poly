@@ -10,12 +10,6 @@ from __future__ import annotations
 
 from typing import Optional
 
-import torch
-from torch_geometric.data import Batch
-
-from features.graphs import (
-    smiles_to_graph, kmer_graph, periodic_graph, atom_features, bond_features,
-)
 from features.graph_utils import MultiScaleSample, build_multiscale, collate_multiscale
 
 
@@ -38,5 +32,4 @@ __all__ = [
     "build_multiscale",
     "collate_multiscale",
     "MultiScaleSample",
-    "Batch",
 ]

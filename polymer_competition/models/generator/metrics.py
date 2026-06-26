@@ -45,7 +45,9 @@ class GenerativeMetrics:
                 try:
                     Chem.SanitizeMol(mol)
                     valid.append(smi)
-                except Exception:
+                except Exception as e:
+                    log = logging.getLogger(__name__)
+                    log.warning("Failed to sanitize molecule: %s", e)
                     pass
 
         validity = len(valid) / len(generated_smiles)
@@ -71,7 +73,9 @@ class GenerativeMetrics:
                 try:
                     scaff = Scaffolds.MurckoScaffold.MurckoScaffoldSmiles(mol=mol)
                     scaffolds.add(scaff)
-                except Exception:
+                except Exception as e:
+                    log = logging.getLogger(__name__)
+                    log.warning("Failed to compute Murcko scaffold: %s", e)
                     pass
         scaffold_diversity = len(scaffolds) / max(len(unique), 1)
 

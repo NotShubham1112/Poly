@@ -1,9 +1,12 @@
 import json
+import os
 import shutil
 import warnings
 from datetime import datetime
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -90,10 +93,10 @@ def plot_property_distribution(desc_df, save_path=None):
     ax.grid(True, alpha=0.25, axis="y")
 
     fig.suptitle("Dataset: Target Property Analysis", fontsize=16, y=1.02)
-    plt.tight_layout()
+    fig.tight_layout()
     if save_path:
         fig.savefig(save_path / "property_distribution.png")
-    plt.show()
+    return fig
 
 
 def plot_molecular_descriptors(desc_df, save_path=None):
@@ -131,10 +134,10 @@ def plot_molecular_descriptors(desc_df, save_path=None):
         axes[j].set_visible(False)
 
     fig.suptitle("Molecular Descriptor Distributions", fontsize=16, y=1.02)
-    plt.tight_layout()
+    fig.tight_layout()
     if save_path:
         fig.savefig(save_path / "molecular_descriptors.png")
-    plt.show()
+    return fig
 
 
 def plot_property_vs_descriptors(desc_df, save_path=None):
@@ -172,10 +175,10 @@ def plot_property_vs_descriptors(desc_df, save_path=None):
 
     fig.suptitle("Property Correlation with Molecular Descriptors",
                  fontsize=16, y=1.02)
-    plt.tight_layout()
+    fig.tight_layout()
     if save_path:
         fig.savefig(save_path / "property_vs_descriptors.png")
-    plt.show()
+    return fig
 
 
 def plot_smiles_length_distribution(smiles_list, save_path=None):
@@ -193,10 +196,10 @@ def plot_smiles_length_distribution(smiles_list, save_path=None):
     ax.set_title("SMILES Length Distribution — Training Set")
     ax.legend(frameon=True, fancybox=False, edgecolor="#cccccc")
     ax.grid(True, alpha=0.25)
-    plt.tight_layout()
+    fig.tight_layout()
     if save_path:
         fig.savefig(save_path / "smiles_length_distribution.png")
-    plt.show()
+    return fig
 
 
 def plot_training_curves(log_path, save_path=None):
@@ -259,10 +262,10 @@ def plot_training_curves(log_path, save_path=None):
         ax.grid(True, alpha=0.25)
 
     fig.suptitle("Generator Training Dynamics", fontsize=16, y=1.02)
-    plt.tight_layout()
+    fig.tight_layout()
     if save_path:
         fig.savefig(save_path / "training_curves.png")
-    plt.show()
+    return fig
 
 
 def plot_generative_metrics(log_path, save_path=None):
@@ -304,10 +307,10 @@ def plot_generative_metrics(log_path, save_path=None):
     ax.set_ylim(-0.05, 1.05)
     ax.legend(frameon=True, fancybox=False, edgecolor="#cccccc", loc="lower right")
     ax.grid(True, alpha=0.25)
-    plt.tight_layout()
+    fig.tight_layout()
     if save_path:
         fig.savefig(save_path / "generative_metrics.png")
-    plt.show()
+    return fig
 
 
 def plot_smiles_heatmap(smiles_list, save_path=None):
@@ -337,10 +340,10 @@ def plot_smiles_heatmap(smiles_list, save_path=None):
     ax.set_title("SMILES Character Occupation Map (100 molecules)")
     cb = fig.colorbar(im, ax=ax, shrink=0.7)
     cb.set_label("Token ID (sorted alphabetically)", fontsize=10)
-    plt.tight_layout()
+    fig.tight_layout()
     if save_path:
         fig.savefig(save_path / "smiles_heatmap.png")
-    plt.show()
+    return fig
 
 
 def plot_embedding_projection(embeddings, properties, save_path=None):
@@ -361,10 +364,10 @@ def plot_embedding_projection(embeddings, properties, save_path=None):
     cb = fig.colorbar(sc, ax=ax, shrink=0.7)
     cb.set_label("Property", fontsize=11)
     ax.grid(True, alpha=0.2)
-    plt.tight_layout()
+    fig.tight_layout()
     if save_path:
         fig.savefig(save_path / "embedding_pca.png")
-    plt.show()
+    return fig
 
 
 def plot_correlation_matrix(desc_df, save_path=None):
@@ -393,10 +396,10 @@ def plot_correlation_matrix(desc_df, save_path=None):
     ax.set_title("Feature Correlation Matrix", fontsize=15, pad=12)
     cb = fig.colorbar(im, ax=ax, shrink=0.75)
     cb.set_label("Pearson R", fontsize=10)
-    plt.tight_layout()
+    fig.tight_layout()
     if save_path:
         fig.savefig(save_path / "correlation_matrix.png")
-    plt.show()
+    return fig
 
 
 def plot_scaffold_diversity(smiles_list, save_path=None):
@@ -411,7 +414,10 @@ def plot_scaffold_diversity(smiles_list, save_path=None):
         try:
             scaff = MurckoScaffold.MurckoScaffoldSmiles(mol=mol)
             scaffolds.append(scaff)
-        except Exception:
+        except Exception as e:
+            import logging
+            log = logging.getLogger(__name__)
+            log.warning("Failed to compute Murcko scaffold: %s", e)
             continue
 
     counter = Counter(scaffolds)
@@ -439,10 +445,10 @@ def plot_scaffold_diversity(smiles_list, save_path=None):
                  fontsize=14)
     ax.invert_yaxis()
     ax.grid(True, alpha=0.2, axis="x")
-    plt.tight_layout()
+    fig.tight_layout()
     if save_path:
         fig.savefig(save_path / "scaffold_diversity.png")
-    plt.show()
+    return fig
 
 
 def plot_ring_vs_property(desc_df, save_path=None):
@@ -473,14 +479,13 @@ def plot_ring_vs_property(desc_df, save_path=None):
     ax.grid(True, alpha=0.2, axis="y")
 
     fig.suptitle("Ring Structure Analysis", fontsize=16, y=1.02)
-    plt.tight_layout()
+    fig.tight_layout()
     if save_path:
         fig.savefig(save_path / "ring_analysis.png")
-    plt.show()
+    return fig
 
 
-def resolve_run_dir(base_dir: str | Path, run_id: str | None = None,
-                    link_name: str = "latest") -> tuple[Path, str]:
+def resolve_run_dir(base_dir: str | Path, run_id: str | None = None) -> tuple[Path, str]:
     base_dir = Path(base_dir)
     base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -496,11 +501,6 @@ def resolve_run_dir(base_dir: str | Path, run_id: str | None = None,
 
     run_dir = base_dir / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-
-    latest_link = base_dir / link_name
-    if latest_link.exists():
-        shutil.rmtree(latest_link, ignore_errors=True)
-    latest_link.mkdir(parents=True, exist_ok=True)
 
     return run_dir, run_id
 
@@ -519,37 +519,42 @@ def generate_all_plots(data_path="data/train.csv", log_path=None,
         latest_dir = None
         run_id_str = run_id or "unnamed"
 
-    plot_dirs = [d for d in [run_dir, latest_dir] if d is not None]
-
     desc_df = compute_descriptors(smiles_list, properties)
 
-    for d in plot_dirs:
-        plot_property_distribution(desc_df, d)
-        plot_molecular_descriptors(desc_df, d)
-        plot_correlation_matrix(desc_df, d)
-        plot_property_vs_descriptors(desc_df, d)
-        plot_smiles_length_distribution(smiles_list, d)
-        plot_ring_vs_property(desc_df, d)
-        plot_scaffold_diversity(smiles_list, d)
-        plot_smiles_heatmap(smiles_list, d)
+    def _save_to_all(fig, filename):
+        for d in [run_dir, latest_dir]:
+            if d is not None:
+                fig.savefig(d / filename)
+        plt.close(fig)
 
-        if log_path:
-            plot_training_curves(log_path, d)
-            plot_generative_metrics(log_path, d)
+    _save_to_all(plot_property_distribution(desc_df), "property_distribution.png")
+    _save_to_all(plot_molecular_descriptors(desc_df), "molecular_descriptors.png")
+    _save_to_all(plot_correlation_matrix(desc_df), "correlation_matrix.png")
+    _save_to_all(plot_property_vs_descriptors(desc_df), "property_vs_descriptors.png")
+    _save_to_all(plot_smiles_length_distribution(smiles_list), "smiles_length_distribution.png")
+    _save_to_all(plot_ring_vs_property(desc_df), "ring_analysis.png")
+    _save_to_all(plot_scaffold_diversity(smiles_list), "scaffold_diversity.png")
+    _save_to_all(plot_smiles_heatmap(smiles_list), "smiles_heatmap.png")
 
-        if embeddings is not None:
-            plot_embedding_projection(embeddings, properties, d)
+    if log_path:
+        _save_to_all(plot_training_curves(log_path), "training_curves.png")
+        _save_to_all(plot_generative_metrics(log_path), "generative_metrics.png")
 
-        manifest = {
-            "run_id": run_id_str,
-            "timestamp": datetime.now().isoformat(),
-            "data_path": str(data_path),
-            "log_path": str(log_path) if log_path else None,
-            "n_samples": len(smiles_list),
-            "n_valid_smiles": len(desc_df),
-        }
-        with open(d / "manifest.json", "w") as f:
-            json.dump(manifest, f, indent=2)
+    if embeddings is not None:
+        _save_to_all(plot_embedding_projection(embeddings, properties), "embedding_pca.png")
+
+    manifest = {
+        "run_id": run_id_str,
+        "timestamp": datetime.now().isoformat(),
+        "data_path": str(data_path),
+        "log_path": str(log_path) if log_path else None,
+        "n_samples": len(smiles_list),
+        "n_valid_smiles": len(desc_df),
+    }
+    for d in [run_dir, latest_dir]:
+        if d is not None:
+            with open(d / "manifest.json", "w") as f:
+                json.dump(manifest, f, indent=2)
 
     if not quiet:
         if run_dir is not None:

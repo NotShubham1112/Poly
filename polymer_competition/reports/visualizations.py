@@ -40,28 +40,28 @@ class ReportGenerator:
 
     def _setup_style(self):
         """Configure matplotlib for publication-quality output."""
+        import matplotlib
         try:
-            import matplotlib
             matplotlib.use("Agg")
-            import matplotlib.pyplot as plt
-            plt.rcParams.update({
-                "figure.figsize": (8, 6),
-                "figure.dpi": 150,
-                "savefig.dpi": 300,
-                "savefig.bbox": "tight",
-                "font.size": 12,
-                "axes.titlesize": 14,
-                "axes.labelsize": 12,
-                "legend.fontsize": 10,
-                "xtick.labelsize": 10,
-                "ytick.labelsize": 10,
-                "lines.linewidth": 2,
-                "lines.markersize": 6,
-                "axes.grid": True,
-                "grid.alpha": 0.3,
-            })
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"  [Warning] Could not set matplotlib backend to Agg: {e}")
+        import matplotlib.pyplot as plt
+        plt.rcParams.update({
+            "figure.figsize": (8, 6),
+            "figure.dpi": 150,
+            "savefig.dpi": 300,
+            "savefig.bbox": "tight",
+            "font.size": 12,
+            "axes.titlesize": 14,
+            "axes.labelsize": 12,
+            "legend.fontsize": 10,
+            "xtick.labelsize": 10,
+            "ytick.labelsize": 10,
+            "lines.linewidth": 2,
+            "lines.markersize": 6,
+            "axes.grid": True,
+            "grid.alpha": 0.3,
+        })
 
     def _get_fig(self, figsize=None):
         import matplotlib.pyplot as plt
@@ -290,7 +290,7 @@ class ReportGenerator:
         bars[best_idx].set_edgecolor("gold")
         bars[best_idx].set_linewidth(3)
 
-        plt.tight_layout()
+        fig.tight_layout()
         return self._save(fig, save_name)
 
     # ------------------------------------------------------------------
@@ -372,8 +372,8 @@ class ReportGenerator:
             for j in range(len(scale_labels)):
                 ax.text(j, i, f"{attn[i, j]:.3f}", ha="center", va="center", fontsize=9)
 
-        plt.colorbar(im, ax=ax, shrink=0.8)
-        plt.tight_layout()
+        fig.colorbar(im, ax=ax, shrink=0.8)
+        fig.tight_layout()
         return self._save(fig, save_name)
 
     # ------------------------------------------------------------------

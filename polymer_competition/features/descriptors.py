@@ -22,7 +22,10 @@ def _safe_mol(smiles: str):
         return None
     try:
         return Chem.MolFromSmiles(smiles)
-    except Exception:
+    except Exception as e:
+        import logging
+        log = logging.getLogger(__name__)
+        log.warning("Failed to parse SMILES: %s", e)
         return None
 
 
@@ -50,7 +53,10 @@ def compute_descriptors(smiles_list, names: list[str] | None = None) -> pd.DataF
             try:
                 desc = calc.CalcDescriptors(mol)
                 rows.append(list(desc))
-            except Exception:
+            except Exception as e:
+                import logging
+                log = logging.getLogger(__name__)
+                log.warning("Failed to compute descriptors for '%s': %s", smi, e)
                 rows.append([np.nan] * len(names))
 
     df = pd.DataFrame(rows, columns=names)

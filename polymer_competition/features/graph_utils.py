@@ -62,12 +62,18 @@ def collate_multiscale(samples: list[MultiScaleSample]) -> dict:
     """
     if not samples:
         return {}
+    valid = []
+    for s in samples:
+        if s.monomer is not None and s.dimer is not None and s.trimer is not None and s.periodic is not None:
+            valid.append(s)
+    if not valid:
+        return {}
     return {
-        "monomer":  Batch.from_data_list([s.monomer  for s in samples if s.monomer  is not None]),
-        "dimer":    Batch.from_data_list([s.dimer    for s in samples if s.dimer    is not None]),
-        "trimer":   Batch.from_data_list([s.trimer   for s in samples if s.trimer   is not None]),
-        "periodic": Batch.from_data_list([s.periodic for s in samples if s.periodic is not None]),
-        "y":    torch.tensor([s.y for s in samples if s.y is not None],
+        "monomer":  Batch.from_data_list([s.monomer  for s in valid]),
+        "dimer":    Batch.from_data_list([s.dimer    for s in valid]),
+        "trimer":   Batch.from_data_list([s.trimer   for s in valid]),
+        "periodic": Batch.from_data_list([s.periodic for s in valid]),
+        "y":    torch.tensor([s.y for s in valid if s.y is not None],
                              dtype=torch.float).view(-1, 1),
-        "smiles": [s.smiles for s in samples],
+        "smiles": [s.smiles for s in valid],
     }

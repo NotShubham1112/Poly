@@ -49,7 +49,10 @@ def _safe_mol(smiles: str) -> Chem.Mol | None:
         return None
     try:
         return Chem.MolFromSmiles(smiles)
-    except Exception:
+    except Exception as e:
+        import logging
+        log = logging.getLogger(__name__)
+        log.warning("Failed to parse SMILES: %s", e)
         return None
 
 

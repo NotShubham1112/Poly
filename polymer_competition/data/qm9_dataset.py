@@ -214,7 +214,8 @@ class QM9Dataset(Dataset):
             if tokens is None:
                 try:
                     tokens = tokenizer.encode(smi)
-                except Exception:
+                except Exception as e:
+                    log.warning("Failed to encode SMILES '%s': %s", smi, e)
                     skip_token += 1
                     continue
 

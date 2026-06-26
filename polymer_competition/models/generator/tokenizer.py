@@ -61,7 +61,10 @@ class SELFIESTokenizer:
                 tokens[-1] = tokens[-1].rstrip("]")
                 for tok in tokens:
                     unique_tokens.add(f"[{tok}]")
-            except Exception:
+            except Exception as e:
+                import logging
+                log = logging.getLogger(__name__)
+                log.warning("Failed to process token: %s", e)
                 continue
 
         sorted_tokens = sorted(unique_tokens)
@@ -92,7 +95,10 @@ class SELFIESTokenizer:
     def try_encode(self, smiles: str) -> torch.LongTensor | None:
         try:
             return self.encode(smiles)
-        except Exception:
+        except Exception as e:
+            import logging
+            log = logging.getLogger(__name__)
+            log.warning("Failed to encode SMILES: %s", e)
             return None
 
     def decode(self, token_ids: list[int]) -> str:
@@ -113,7 +119,10 @@ class SELFIESTokenizer:
         try:
             smiles = sf.decoder(selfies_str)
             return self._postprocess(smiles)
-        except Exception:
+        except Exception as e:
+            import logging
+            log = logging.getLogger(__name__)
+            log.warning("Failed to decode SELFIES: %s", e)
             return ""
 
     def encode_batch(self, smiles_list: list[str]) -> list[torch.LongTensor]:

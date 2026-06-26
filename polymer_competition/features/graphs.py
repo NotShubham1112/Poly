@@ -106,7 +106,9 @@ def _safe_mol(smiles: str) -> Optional[Chem.Mol]:
         return None
     try:
         return Chem.MolFromSmiles(smiles)
-    except Exception:
+    except Exception as e:
+        log = logging.getLogger(__name__)
+        log.warning("Failed to parse SMILES: %s", e)
         return None
 
 
@@ -166,7 +168,9 @@ def kmer_graph(smiles: str, k: int = 2, y: Optional[float] = None) -> Optional[D
 
     try:
         return _build_kmer(mol, smiles, k, y, star_atoms)
-    except Exception:
+    except Exception as e:
+        log = logging.getLogger(__name__)
+        log.warning("Failed to build k-mer graph for '%s', falling back to monomer: %s", smiles, e)
         return smiles_to_graph(smiles, y=y)
 
 

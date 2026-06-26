@@ -34,7 +34,9 @@ class MoleculeValidator:
                         f"stage 3 failed: valence violation atom {atom.GetIdx()} "
                         f"({atom.GetSymbol()}) explicit={ev} > total={tv}",
                     )
-            except Exception:
+            except Exception as e:
+                log = logging.getLogger(__name__)
+                log.warning("Failed to validate atom valence: %s", e)
                 pass
 
         try:

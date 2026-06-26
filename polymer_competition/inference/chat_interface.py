@@ -61,7 +61,10 @@ def draw_molecule_svg(smiles: str, width: int = 400, height: int = 300) -> str |
         drawer.DrawMolecule(mol)
         drawer.FinishDrawing()
         return drawer.GetDrawingText()
-    except Exception:
+    except Exception as e:
+        import logging
+        log = logging.getLogger(__name__)
+        log.warning("Failed to draw molecule SVG: %s", e)
         return None
 
 
@@ -77,7 +80,10 @@ def draw_molecule_png(smiles: str, size: tuple = (400, 300)) -> bytes | None:
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         return buf.getvalue()
-    except Exception:
+    except Exception as e:
+        import logging
+        log = logging.getLogger(__name__)
+        log.warning("Failed to draw molecule PNG: %s", e)
         return None
 
 
@@ -113,7 +119,10 @@ def load_predictor():
     try:
         from inference.predictor import PolymerPredictor
         return PolymerPredictor("outputs/checkpoints/polychain_best.pt")
-    except Exception:
+    except Exception as e:
+        import logging
+        log = logging.getLogger(__name__)
+        log.warning("Failed to load predictor: %s", e)
         return None
 
 
@@ -226,7 +235,10 @@ with tab_chat:
                 try:
                     yhat = pred.predict([detected_smi])
                     reply += f"\n**Predicted property: {yhat[0]:.4f}**"
-                except Exception:
+                except Exception as e:
+                    import logging
+                    log = logging.getLogger(__name__)
+                    log.warning("Prediction failed for '%s': %s", detected_smi, e)
                     reply += "\n⚠️ Could not run prediction (check checkpoint)."
             else:
                 reply += "\n⚠️ No trained model checkpoint found."
