@@ -315,17 +315,11 @@ def main():
     set_seed(seed)
     use_cuda = torch.cuda.is_available() and cfg.get("device", {}).get("use_cuda", True)
     if use_cuda:
-        cap = torch.cuda.get_device_capability()
-        min_cap = (7, 0)  # PyTorch 2.6+ requires sm_70+
-        if cap < min_cap:
-            print(f"WARNING: GPU compute capability {cap} < {min_cap}. Falling back to CPU.")
+        try:
+            torch.tensor([1.0], device="cuda").sum()
+        except Exception:
+            print("WARNING: CUDA device found but not usable. Falling back to CPU.")
             use_cuda = False
-        else:
-            try:
-                torch.tensor([1.0], device="cuda").sum()
-            except Exception:
-                print("WARNING: CUDA device found but not usable. Falling back to CPU.")
-                use_cuda = False
     device = torch.device("cuda" if use_cuda else "cpu")
     print(f"Device: {device}")
     target_col = cfg["data"]["target_col"]
