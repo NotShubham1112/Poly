@@ -1,3 +1,7 @@
+"""experiments/manifest.py
+
+Lightweight experiment tracking: records each training run in manifest.json.
+"""
 from __future__ import annotations
 
 import hashlib

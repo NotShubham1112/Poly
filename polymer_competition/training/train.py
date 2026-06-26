@@ -610,12 +610,14 @@ def main():
 
     # Record run in experiment manifest
     from experiments.manifest import record_run
+    ckpt_path = ckpt_dir / f"{ckpt_tag}_best.pt"
     record_run(
         experiment=exp_ver,
         target=target,
         model_type=args.model_type,
         fold=args.fold,
         score=metrics.get("r2"),
+        checkpoint=str(ckpt_path) if ckpt_path.exists() else None,
         duration_sec=int(time.time() - t_start),
         seed=seed,
         config_path=args.config,
