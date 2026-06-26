@@ -313,6 +313,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() and
                           cfg.get("device", {}).get("use_cuda", True) else "cpu")
     target_col = cfg["data"]["target_col"]
+    exp_ver = cfg.get("experiment", {}).get("version", "v1")
     ckpt_dir = Path(cfg["paths"].get("checkpoints_dir", "outputs/checkpoints/"))
 
     target = args.target or list(cfg.get("targets", {"tg": {}}).keys())[0]
@@ -325,6 +326,8 @@ def main():
         target_df = pd.read_csv(target_train_csv)
         if "SMILES" not in target_df.columns:
             target_df = target_df.rename(columns={"smiles": "SMILES"})
+        # Inner merge preserves per-target row order (left) so that
+        # fold indices in splits_{target}.pkl align with train rows
         train = target_df.merge(train, on="SMILES", how="inner")
         splits_path = data_dir / f"splits_{target}.pkl"
     else:
@@ -381,7 +384,7 @@ def main():
         pred_va = train_tabular(model, X_tr, y_tr, X_va, y_va, model_cfg, args.model_type, device)
         # Save sklearn-style model checkpoint
         ckpt_dir.mkdir(parents=True, exist_ok=True)
-        ckpt_tag = f"{args.person}_{target}_{args.model_type}_fold{args.fold}"
+        ckpt_tag = f"{exp_ver}_{target}_{args.model_type}_fold{args.fold}"
         best_path = ckpt_dir / f"{ckpt_tag}_best.pt"
         final_path = ckpt_dir / f"{ckpt_tag}_final.pt"
         ckpt_payload = {
@@ -457,7 +460,7 @@ def main():
 
         # Save MLP checkpoint
         ckpt_dir.mkdir(parents=True, exist_ok=True)
-        ckpt_tag = f"{args.person}_{target}_{args.model_type}_fold{args.fold}"
+        ckpt_tag = f"{exp_ver}_{target}_{args.model_type}_fold{args.fold}"
         best_path = ckpt_dir / f"{ckpt_tag}_best.pt"
         final_path = ckpt_dir / f"{ckpt_tag}_final.pt"
         ckpt_payload = {
@@ -596,7 +599,7 @@ def main():
     # Save OOF predictions
     pred_dir = Path(cfg["paths"]["predictions_dir"])
     pred_dir.mkdir(parents=True, exist_ok=True)
-    out_file = pred_dir / f"{args.person}_{target}_{args.model_type}_fold{args.fold}.pkl"
+    out_file = pred_dir / f"{exp_ver}_{target}_{args.model_type}_fold{args.fold}.pkl"
     with open(out_file, "wb") as f:
         pickle.dump({"val_idx": val_idx, "pred": pred_va, "y": y_va,
                      "metrics": metrics, "model_type": args.model_type,
