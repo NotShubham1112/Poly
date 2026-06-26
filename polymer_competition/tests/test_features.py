@@ -77,3 +77,17 @@ def test_cst_batch():
     M = compute_cst_batch(SAMPLE_SMILES)
     assert M.shape == (3, CST_DIM)
     assert not np.isnan(M).any()
+
+
+def test_feature_cache_metadata():
+    """After building features, metadata file exists with version info."""
+    from pathlib import Path
+    import yaml
+    ROOT = Path(__file__).resolve().parent.parent
+    meta_path = ROOT / "data" / "processed" / "metadata.yaml"
+    assert meta_path.exists()
+    with open(meta_path) as f:
+        meta = yaml.safe_load(f)
+    assert "feature_version" in meta
+    assert "git_commit" in meta
+    assert "rdkit_version" in meta

@@ -6,8 +6,7 @@
 
 project:
   name: "polymer_competition"
-  version: "1.0.0"
-  description: "Polymer property prediction with traditional ML + PolyChain"
+  version: "1.1.0"
 
 paths:
   data_dir: "data/"
@@ -21,28 +20,48 @@ paths:
   submissions_dir: "outputs/submissions/"
   reports_dir: "reports/"
 
-seed: 42
+seed:
+  global: 42
+  numpy: 42
+  torch: 42
+  python: 42
+  xgboost: 42
+  catboost: 42
+  lightgbm: 42
+
 deterministic: true
+
+data:
+  smiles_col: "smiles"
+  id_col: "id"
+  target_col: "target"
+  target_type: "target_type"
+  fail_policy: "warn"
+
+targets:
+  tg:
+    type: "tg"
+  egc:
+    type: "egc"
 
 cv:
   n_folds: 5
-  split_type: "group"  # 'group' uses SMILES scaffold; alternatives: 'random', 'stratified'
-  group_strategy: "scaffold"  # RDKit Murcko scaffold
-
-target:
-  column: "property"  # competition target column (e.g., Tg, Tm, density)
-  task: "regression"
+  split_type: "group"
+  group_strategy: "scaffold"
 
 device:
   use_cuda: true
   gpu_id: 0
 
-logging:
-  level: "INFO"
-  tensorboard: true
-  csv_log: true
+experiment:
+  version: "v1"
 
 ensemble:
-  strategy: "inverse_rmse"  # 'inverse_rmse', 'nelder_mead', 'stacking'
+  strategy: "inverse_rmse"
   min_weight: 0.0
   max_weight: 1.0
+
+logging:
+  level: "INFO"
+  tensorboard: false
+  csv_log: true
