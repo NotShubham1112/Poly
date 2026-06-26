@@ -311,6 +311,7 @@ def main():
         model_cfg = {}
 
     seed = cfg.get("seed", {}).get("global", 42)
+    t_start = time.time()
     set_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() and
                           cfg.get("device", {}).get("use_cuda", True) else "cpu")
@@ -606,6 +607,19 @@ def main():
                      "metrics": metrics, "model_type": args.model_type,
                      "fold": args.fold, "target": target}, f)
     print(f"Saved predictions -> {out_file}")
+
+    # Record run in experiment manifest
+    from experiments.manifest import record_run
+    record_run(
+        experiment=exp_ver,
+        target=target,
+        model_type=args.model_type,
+        fold=args.fold,
+        score=metrics.get("r2"),
+        duration_sec=int(time.time() - t_start),
+        seed=seed,
+        config_path=args.config,
+    )
 
     # Test inference
     if not args.skip_inference and args.target:
