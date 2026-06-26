@@ -298,6 +298,8 @@ def main():
                         help="Save recovery checkpoint every N epochs (0 to disable)")
     parser.add_argument("--target", default=None,
                         help="Target name (tg/egc). Loads target-specific features and splits.")
+    parser.add_argument("--skip_inference", action="store_true",
+                        help="Skip test inference after training.")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -365,6 +367,7 @@ def main():
     # Build model
     feature_cols = [c for c in train.columns
                     if c not in ("SMILES", "id", "canon_smiles", "target_type", target_col)]
+    scaler = None
 
     if args.model_type in ("ridge", "xgb", "lgb", "catboost", "rf"):
         X_tr = tr_df[feature_cols].values
@@ -373,9 +376,7 @@ def main():
         y_va = va_df[target_col].values
 
         # Apply StandardScaler for linear models (Ridge)
-        scaler = None
         if args.model_type in MODELS_NEED_SCALING:
-            from sklearn.preprocessing import StandardScaler
             scaler = StandardScaler()
             X_tr = scaler.fit_transform(X_tr)
             X_va = scaler.transform(X_va)
@@ -603,8 +604,74 @@ def main():
     with open(out_file, "wb") as f:
         pickle.dump({"val_idx": val_idx, "pred": pred_va, "y": y_va,
                      "metrics": metrics, "model_type": args.model_type,
-                     "fold": args.fold, "person": args.person}, f)
+                     "fold": args.fold, "target": target}, f)
     print(f"Saved predictions -> {out_file}")
+
+    # Test inference
+    if not args.skip_inference and args.target:
+        test_feat = pd.read_parquet(data_dir / "processed" / "features_test.parquet")
+        target_test_csv = data_dir / target / "test.csv"
+        test_ids = pd.read_csv(target_test_csv)["id"].tolist()
+        test_feat = test_feat[test_feat["id"].isin(test_ids)].reset_index(drop=True)
+        test_feat_cols = [c for c in test_feat.columns if c in feature_cols]
+        X_test = test_feat[test_feat_cols].values
+
+        if args.model_type in ("ridge", "xgb", "lgb", "catboost", "rf"):
+            if scaler is not None:
+                X_test = scaler.transform(X_test)
+            test_preds = model.predict(X_test)
+        elif args.model_type in ("mlp",):
+            if scaler is not None:
+                X_test = scaler.transform(X_test).astype(np.float32)
+            model.eval()
+            with torch.no_grad():
+                test_preds = model(torch.from_numpy(X_test).to(device)).squeeze(-1).cpu().numpy()
+        elif args.model_type == "polychain":
+            from features.graph_utils import build_multiscale
+            from models.polychain.cst import compute_cst_batch
+            test_samples = [build_multiscale(s) for s in test_feat["SMILES"].tolist()]
+            test_samples = [s for s in test_samples if s is not None]
+
+            def collate(samples):
+                from features.graph_utils import collate_multiscale
+                batch = collate_multiscale(samples)
+                batch["cst"] = torch.tensor(compute_cst_batch([s.smiles for s in samples]), dtype=torch.float)
+                return batch
+
+            test_loader = DataLoader(test_samples, batch_size=64, shuffle=False, collate_fn=collate)
+            model.eval()
+            test_preds = []
+            with torch.no_grad():
+                for batch_dict in test_loader:
+                    batch_dict = move_to_device(batch_dict, device)
+                    pred = model(batch_dict)
+                    test_preds.append(pred.cpu().numpy())
+            test_preds = np.concatenate(test_preds)
+        else:
+            from features.graphs import smiles_to_graph
+            test_graphs = [smiles_to_graph(s) for s in test_feat["SMILES"].tolist()]
+            test_graphs = [g for g in test_graphs if g is not None]
+            from torch_geometric.loader import DataLoader as PyGDL
+            test_loader = PyGDL(test_graphs, batch_size=64, shuffle=False)
+            model.eval()
+            test_preds = []
+            with torch.no_grad():
+                for batch in test_loader:
+                    batch = batch.to(device)
+                    pred = model(batch)
+                    test_preds.append(pred.cpu().numpy())
+            test_preds = np.concatenate(test_preds)
+
+        test_out = pred_dir / f"{exp_ver}_{target}_{args.model_type}_fold{args.fold}_test.pkl"
+        with open(test_out, "wb") as f:
+            pickle.dump({
+                "id": test_feat["id"].values.tolist(),
+                "pred": test_preds.tolist(),
+                "model_type": args.model_type,
+                "fold": args.fold,
+                "target": target,
+            }, f)
+        print(f"Test predictions saved -> {test_out}")
 
 
 if __name__ == "__main__":
