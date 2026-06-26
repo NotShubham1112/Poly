@@ -146,7 +146,10 @@ Outputs per target:
 ### 5.4 Cross-Validation Splits
 
 Two independent `splits_tg.pkl` and `splits_egc.pkl` using scaffold-based GroupKFold within
-each property's sample set. Split metadata includes:
+each property's sample set. Scaffold generation via RDKit Murcko is deterministic for a fixed
+RDKit version, ensuring reproducible splits across runs.
+
+Split metadata includes:
 
 ```python
 {
@@ -199,8 +202,12 @@ Two separate caches (train / test):
 | Train | `data/processed/features_train.parquet` | 6171 |
 | Test | `data/processed/features_test.parquet` | 4115 |
 
+The cache stores **one feature vector per unique canonical SMILES**. Training
+datasets reference cached features via a lookup rather than duplicating feature
+computation for repeated SMILES.
+
 Cache columns include:
-- `canonical_smiles`
+- `canonical_smiles` (unique, deduplicated)
 - All fingerprint bits and descriptor values
 - `feature_version` — version string for cache invalidation
 - `git_commit` — current commit hash at build time
@@ -278,14 +285,18 @@ Location: `experiments/manifest.json`
 
 ```json
 {
+    "experiment": "v1",
     "target": "tg",
     "model": "xgb",
     "fold": 3,
     "status": "completed",
     "score": 0.8842,
     "checkpoint": "outputs/checkpoints/v1_tg_xgb_fold3_best.pt",
-    "duration": 531,
-    "seed": 42
+    "duration_sec": 531,
+    "seed": 42,
+    "git_commit": "a1b2c3d4e5f6...",
+    "config_hash": "sha256:e3b0c44298fc1...",
+    "environment": "experiments/environment.txt"
 }
 ```
 
@@ -408,7 +419,7 @@ Automatic checks run at each pipeline stage:
 | Stage | Check | Action |
 |-------|-------|--------|
 | Data load | No duplicate IDs | Assert |
-| Canonicalization | All SMILES parse successfully | Log failures, assert ≥ 99% |
+| Canonicalization | All SMILES parse successfully | Log failures, configurable policy: fail-fast or max-failures=N |
 | Feature build | No missing descriptors (after imputation) | Assert |
 | Feature build | Feature dimensions match train/test | Assert |
 | CV split | All samples assigned to exactly one fold | Assert |
