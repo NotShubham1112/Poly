@@ -17,6 +17,7 @@ from sklearn.model_selection import GroupKFold
 from .fingerprints import all_fingerprints
 from .descriptors import compute_descriptors, select_descriptors_by_variance
 from .custom_polymer import compute_all_custom_features
+from data.split_by_target import split_by_target
 
 
 def canonicalize(smiles_list: list[str]) -> list[str | None]:
@@ -54,8 +55,8 @@ def get_config_hash(cfg: dict) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
-def _smiles_scaffold(s: str) -> str:
-    s = s.replace("*", "")
+def _smiles_scaffold(smiles: str) -> str:
+    s = smiles.replace("*", "")
     s = s.replace("(", "").replace(")", "").replace("[", "").replace("]", "")
     return s[:20]
 
@@ -77,12 +78,17 @@ def build_features(config_path: str = "config.yaml") -> None:
     all_smiles = train["SMILES"].tolist() + test["SMILES"].tolist()
     canon = canonicalize(all_smiles)
     n_invalid = sum(1 for c in canon if c is None)
+    fail_policy = cfg.get("data", {}).get("fail_policy", "warn")
     if n_invalid:
-        print(f"WARNING: {n_invalid} SMILES failed canonicalization")
+        msg = f"{n_invalid} SMILES failed canonicalization"
+        if fail_policy == "raise":
+            raise ValueError(msg)
+        elif fail_policy == "warn":
+            print(f"WARNING: {msg}")
     train["canon_smiles"] = canon[: len(train)]
     test["canon_smiles"] = canon[len(train):]
 
-    unique_smiles = list(set(s for s in canon if s is not None))
+    unique_smiles = sorted(set(s for s in canon if s is not None))
     print(f"Building features on {len(unique_smiles)} unique canonical SMILES")
     fps = all_fingerprints(unique_smiles)
     desc = compute_descriptors(unique_smiles)
@@ -149,8 +155,7 @@ def build_features(config_path: str = "config.yaml") -> None:
         yaml.dump(meta, f)
     print(f"Cache metadata -> {out_dir / 'metadata.yaml'}")
 
-    from data.split_by_target import split_by_target as _split_ds
-    _split_ds(data_dir / "train.csv", data_dir / "test.csv", data_dir,
+    split_by_target(data_dir / "train.csv", data_dir / "test.csv", data_dir,
               targets=list(cfg["targets"].keys()))
 
     for t_name, t_cfg in cfg["targets"].items():

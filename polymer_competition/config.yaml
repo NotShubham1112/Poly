@@ -36,6 +36,7 @@ data:
   id_col: "id"
   target_col: "target"
   target_type: "target_type"
+  fail_policy: "warn"
 
 targets:
   tg:
