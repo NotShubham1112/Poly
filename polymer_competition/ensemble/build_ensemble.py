@@ -89,12 +89,14 @@ def main():
             test_rows.append({
                 "id": int(np.asarray(data["id"])[i]),
                 "pred": float(p),
+                "model_type": data.get("model_type", "unknown"),
             })
     test_df = pd.DataFrame(test_rows)
-    blend = test_df.groupby("id")["pred"].mean()
+    test_pivot = test_df.groupby(["id", "model_type"])["pred"].mean().unstack()
+    test_blend = test_pivot.values @ w
     submission = pd.DataFrame({
-        "id": blend.index,
-        "target": blend.values,
+        "id": test_pivot.index,
+        "target": test_blend,
     })
     sub_path = sub_dir / f"{target}_preds.csv"
     submission.to_csv(sub_path, index=False)
