@@ -91,10 +91,10 @@ def main():
                 "pred": float(p),
             })
     test_df = pd.DataFrame(test_rows)
-    test_blend = test_df.groupby("id")["pred"].mean().values
+    blend = test_df.groupby("id")["pred"].mean()
     submission = pd.DataFrame({
-        "id": test_df["id"].unique(),
-        "target": test_blend,
+        "id": blend.index,
+        "target": blend.values,
     })
     sub_path = sub_dir / f"{target}_preds.csv"
     submission.to_csv(sub_path, index=False)
