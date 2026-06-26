@@ -296,6 +296,8 @@ def main():
                         help="Override number of training epochs.")
     parser.add_argument("--auto_save_every", type=int, default=5,
                         help="Save recovery checkpoint every N epochs (0 to disable)")
+    parser.add_argument("--target", default=None,
+                        help="Target name (tg/egc). Loads target-specific features and splits.")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -306,24 +308,39 @@ def main():
     else:
         model_cfg = {}
 
-    seed = cfg.get("seed", 42)
+    seed = cfg.get("seed", {}).get("global", 42)
     set_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() and
                           cfg.get("device", {}).get("use_cuda", True) else "cpu")
-    target = cfg["target"]["column"]
+    target_col = cfg["data"]["target_col"]
     ckpt_dir = Path(cfg["paths"].get("checkpoints_dir", "outputs/checkpoints/"))
 
-    # Load features and splits
+    target = args.target or list(cfg.get("targets", {"tg": {}}).keys())[0]
+
     data_dir = Path(cfg["paths"]["data_dir"])
-    train = pd.read_parquet(data_dir / "processed" / "train_features.parquet")
+
+    if args.target:
+        train = pd.read_parquet(data_dir / "processed" / "features_train.parquet")
+        target_train_csv = data_dir / target / "train.csv"
+        target_df = pd.read_csv(target_train_csv)
+        if "SMILES" not in target_df.columns:
+            target_df = target_df.rename(columns={"smiles": "SMILES"})
+        train = target_df.merge(train, on="SMILES", how="inner")
+        splits_path = data_dir / f"splits_{target}.pkl"
+    else:
+        train = pd.read_parquet(data_dir / "processed" / "train_features.parquet")
+        splits_path = data_dir / "splits.pkl"
+
     try:
-        with open(data_dir / "splits.pkl", "rb") as f:
+        with open(splits_path, "rb") as f:
             splits = pickle.load(f)
-        print(f"Loaded {len(splits)} fold splits from {data_dir / 'splits.pkl'}")
+        print(f"Loaded {len(splits)} fold splits from {splits_path}")
     except FileNotFoundError:
-        print(f"data/splits.pkl not found. Generating splits on-the-fly ...")
-        from features.build_features import make_splits as _make_splits
-        splits = _make_splits(train, n_folds=cfg["cv"]["n_folds"], seed=seed, target=target)
+        print(f"{splits_path} not found. Generating splits on-the-fly ...")
+        from data.generate_splits import generate_splits as _make_splits
+        splits = _make_splits(str(splits_path), str(splits_path),
+                              n_folds=cfg["cv"]["n_folds"], seed=seed,
+                              target_col=target_col, smiles_col="SMILES")
 
     fold = splits[args.fold]
     train_idx, val_idx = fold["train"], fold["val"]
@@ -344,13 +361,13 @@ def main():
 
     # Build model
     feature_cols = [c for c in train.columns
-                    if c not in ("SMILES", "id", target)]
+                    if c not in ("SMILES", "id", "canon_smiles", "target_type", target_col)]
 
     if args.model_type in ("ridge", "xgb", "lgb", "catboost", "rf"):
         X_tr = tr_df[feature_cols].values
-        y_tr = tr_df[target].values
+        y_tr = tr_df[target_col].values
         X_va = va_df[feature_cols].values
-        y_va = va_df[target].values
+        y_va = va_df[target_col].values
 
         # Apply StandardScaler for linear models (Ridge)
         scaler = None
@@ -364,7 +381,7 @@ def main():
         pred_va = train_tabular(model, X_tr, y_tr, X_va, y_va, model_cfg, args.model_type, device)
         # Save sklearn-style model checkpoint
         ckpt_dir.mkdir(parents=True, exist_ok=True)
-        ckpt_tag = f"{args.person}_{args.model_type}_fold{args.fold}"
+        ckpt_tag = f"{args.person}_{target}_{args.model_type}_fold{args.fold}"
         best_path = ckpt_dir / f"{ckpt_tag}_best.pt"
         final_path = ckpt_dir / f"{ckpt_tag}_final.pt"
         ckpt_payload = {
@@ -384,9 +401,9 @@ def main():
     elif args.model_type in ("mlp",):
         from models.mlp import FingerprintMLP
         X_tr = tr_df[feature_cols].values.astype(np.float32)
-        y_tr = tr_df[target].values.astype(np.float32)
+        y_tr = tr_df[target_col].values.astype(np.float32)
         X_va = va_df[feature_cols].values.astype(np.float32)
-        y_va = va_df[target].values.astype(np.float32)
+        y_va = va_df[target_col].values.astype(np.float32)
 
         # Apply StandardScaler for MLP
         scaler = StandardScaler()
@@ -440,7 +457,7 @@ def main():
 
         # Save MLP checkpoint
         ckpt_dir.mkdir(parents=True, exist_ok=True)
-        ckpt_tag = f"{args.person}_{args.model_type}_fold{args.fold}"
+        ckpt_tag = f"{args.person}_{target}_{args.model_type}_fold{args.fold}"
         best_path = ckpt_dir / f"{ckpt_tag}_best.pt"
         final_path = ckpt_dir / f"{ckpt_tag}_final.pt"
         ckpt_payload = {
@@ -462,9 +479,9 @@ def main():
 
         # Build multi-scale graphs
         train_samples = [build_multiscale(s, y=y) for s, y in
-                         zip(tr_df["SMILES"].tolist(), tr_df[target].tolist())]
+                         zip(tr_df["SMILES"].tolist(), tr_df[target_col].tolist())]
         val_samples = [build_multiscale(s, y=y) for s, y in
-                       zip(va_df["SMILES"].tolist(), va_df[target].tolist())]
+                       zip(va_df["SMILES"].tolist(), va_df[target_col].tolist())]
         train_samples = [s for s in train_samples if s is not None]
         val_samples = [s for s in val_samples if s is not None]
 
@@ -527,9 +544,9 @@ def main():
         # GNN baselines (GCN/GAT/MPNN/GraphTransformer/FusionNet)
         from features.graphs import smiles_to_graph
         train_graphs = [smiles_to_graph(s, y=y) for s, y in
-                        zip(tr_df["SMILES"].tolist(), tr_df[target].tolist())]
+                        zip(tr_df["SMILES"].tolist(), tr_df[target_col].tolist())]
         val_graphs = [smiles_to_graph(s, y=y) for s, y in
-                      zip(va_df["SMILES"].tolist(), va_df[target].tolist())]
+                      zip(va_df["SMILES"].tolist(), va_df[target_col].tolist())]
         train_graphs = [g for g in train_graphs if g is not None]
         val_graphs = [g for g in val_graphs if g is not None]
 
@@ -567,7 +584,7 @@ def main():
         pred_va = np.concatenate(preds)
 
     # Metrics
-    y_va = va_df[target].values
+    y_va = va_df[target_col].values
     metrics = {
         "rmse": rmse(y_va, pred_va),
         "mae": mae(y_va, pred_va),
@@ -579,7 +596,7 @@ def main():
     # Save OOF predictions
     pred_dir = Path(cfg["paths"]["predictions_dir"])
     pred_dir.mkdir(parents=True, exist_ok=True)
-    out_file = pred_dir / f"{args.person}_{args.model_type}_fold{args.fold}.pkl"
+    out_file = pred_dir / f"{args.person}_{target}_{args.model_type}_fold{args.fold}.pkl"
     with open(out_file, "wb") as f:
         pickle.dump({"val_idx": val_idx, "pred": pred_va, "y": y_va,
                      "metrics": metrics, "model_type": args.model_type,
