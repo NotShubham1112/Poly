@@ -313,8 +313,21 @@ def main():
     seed = cfg.get("seed", {}).get("global", 42)
     t_start = time.time()
     set_seed(seed)
-    device = torch.device("cuda" if torch.cuda.is_available() and
-                          cfg.get("device", {}).get("use_cuda", True) else "cpu")
+    use_cuda = torch.cuda.is_available() and cfg.get("device", {}).get("use_cuda", True)
+    if use_cuda:
+        cap = torch.cuda.get_device_capability()
+        min_cap = (7, 0)  # PyTorch 2.6+ requires sm_70+
+        if cap < min_cap:
+            print(f"WARNING: GPU compute capability {cap} < {min_cap}. Falling back to CPU.")
+            use_cuda = False
+        else:
+            try:
+                torch.tensor([1.0], device="cuda").sum()
+            except Exception:
+                print("WARNING: CUDA device found but not usable. Falling back to CPU.")
+                use_cuda = False
+    device = torch.device("cuda" if use_cuda else "cpu")
+    print(f"Device: {device}")
     target_col = cfg["data"]["target_col"]
     exp_ver = cfg.get("experiment", {}).get("version", "v1")
     ckpt_dir = Path(cfg["paths"].get("checkpoints_dir", "outputs/checkpoints/"))
@@ -325,13 +338,26 @@ def main():
 
     if args.target:
         train = pd.read_parquet(data_dir / "processed" / "features_train.parquet")
-        target_train_csv = data_dir / target / "train.csv"
-        target_df = pd.read_csv(target_train_csv)
-        if "SMILES" not in target_df.columns:
-            target_df = target_df.rename(columns={"smiles": "SMILES"})
-        # Inner merge preserves per-target row order (left) so that
-        # fold indices in splits_{target}.pkl align with train rows
-        train = target_df.merge(train, on="SMILES", how="inner")
+        full_train = pd.read_csv(data_dir / "train.csv")
+        if len(train) == len(full_train):
+            # Same row count — use positional alignment (preserves fold split indices)
+            train[target_col] = full_train[target_col].values
+            train["target_type"] = full_train["target_type"].values
+        else:
+            # Row count mismatch due to canonicalization failures — use SMILES merge
+            from rdkit import Chem
+            def _canon(s):
+                mol = Chem.MolFromSmiles(s)
+                return Chem.MolToSmiles(mol, canonical=True) if mol else None
+            canon_map = {s: _canon(s) for s in full_train["smiles"].unique()}
+            full_train["canon_smiles"] = full_train["smiles"].map(canon_map)
+            full_train = full_train.dropna(subset=["canon_smiles"])
+            train = full_train[["canon_smiles", target_col, "target_type"]].merge(
+                train.drop(columns=["canon_smiles"], errors="ignore"),
+                left_on="canon_smiles", right_on="SMILES", how="left",
+            )
+            train = train.dropna(subset=[target_col]).reset_index(drop=True)
+        train = train[train["target_type"] == target].reset_index(drop=True)
         splits_path = data_dir / f"splits_{target}.pkl"
     else:
         train = pd.read_parquet(data_dir / "processed" / "train_features.parquet")

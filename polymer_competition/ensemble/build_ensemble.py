@@ -40,6 +40,14 @@ def build_oof_matrix(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, list[str
     return grouped.values, y.values, list(grouped.columns)
 
 
+def _drop_nan_models(oof: np.ndarray, y: np.ndarray, model_names: list[str]
+                     ) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    valid = ~np.any(np.isnan(oof), axis=0)
+    if not np.any(valid):
+        return oof, y, model_names
+    return oof[:, valid], y, [m for m, v in zip(model_names, valid) if v]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config.yaml")
@@ -64,6 +72,12 @@ def main():
     print(f"Loaded {len(df)} rows from {df['model_type'].nunique()} model types for target={target}")
 
     oof, y, model_names = build_oof_matrix(df)
+    oof, y, model_names = _drop_nan_models(oof, y, model_names)
+    if len(model_names) == 0:
+        print(f"No models with complete OOF predictions for target={target}. Skipping.")
+        return
+    print(f"Using {len(model_names)} models with complete predictions: {model_names}")
+
     w = get_weights(args.strategy or cfg["ensemble"]["strategy"], oof, y)
     print(f"Weights ({target}): {dict(zip(model_names, w.round(4)))}")
 
@@ -93,6 +107,11 @@ def main():
             })
     test_df = pd.DataFrame(test_rows)
     test_pivot = test_df.groupby(["id", "model_type"])["pred"].mean().unstack()
+    # Align test columns with the models used in OOF weight optimization
+    test_pivot = test_pivot[[m for m in model_names if m in test_pivot.columns]]
+    if len(test_pivot.columns) == 0:
+        print(f"No test predictions for models {model_names}. Skipping submission.")
+        return
     test_blend = test_pivot.values @ w
     submission = pd.DataFrame({
         "id": test_pivot.index,
