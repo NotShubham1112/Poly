@@ -18,6 +18,7 @@ from sklearn.model_selection import GroupKFold
 from .fingerprints import all_fingerprints
 from .descriptors import compute_descriptors, select_descriptors_by_variance
 from .custom_polymer import compute_all_custom_features
+from .polymer_descriptors import compute_polymer_descriptors
 from data.split_by_target import split_by_target
 
 
@@ -95,6 +96,8 @@ def build_features(config_path: str = "config.yaml") -> None:
     desc = compute_descriptors(unique_smiles)
     desc = select_descriptors_by_variance(desc)
     cust = compute_all_custom_features(unique_smiles)
+    poly_desc = [compute_polymer_descriptors(s) for s in unique_smiles]
+    poly_df = pd.DataFrame(poly_desc)
 
     fp_dfs = {}
     for name, arr in fps.items():
@@ -111,11 +114,12 @@ def build_features(config_path: str = "config.yaml") -> None:
         [pd.DataFrame({"canon_smiles": unique_smiles})]
         + [df.astype(np.float32) for df in fp_dfs.values()]
         + [desc_df.reset_index(drop=True).astype(np.float32)]
-        + [cust_df.reset_index(drop=True).astype(np.float32)],
+        + [cust_df.reset_index(drop=True).astype(np.float32)]
+        + [poly_df.astype(np.float32)],
         axis=1,
     )
 
-    del fp_dfs, desc_df, cust_df
+    del fp_dfs, desc_df, cust_df, poly_df
     gc.collect()
 
     num_cols = [c for c in cache_df.columns if c != "canon_smiles" and cache_df[c].dtype != object]
