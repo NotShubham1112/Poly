@@ -114,7 +114,8 @@ def build_model(model_type: str, cfg: dict, in_dim: int = None, edge_dim: int = 
                          n_backbone_layers=cfg.get("n_backbone_layers", 4),
                          n_hamf_layers=cfg.get("n_hamf_layers", 2),
                          cst_dim=cfg.get("cst_dim", 32),
-                         dropout=cfg.get("dropout", 0.2)), True
+                         dropout=cfg.get("dropout", 0.2),
+                         grad_checkpoint=cfg.get("gradient_checkpointing", True)), True
     raise ValueError(f"Unknown model_type: {model_type}")
 
 
@@ -389,6 +390,14 @@ def main():
             model_cfg = mt_entry
         else:
             model_cfg = {}
+
+    # Thread training-level config into model_cfg
+    train_cfg = cfg.get("training", {})
+    model_cfg["amp"] = train_cfg.get("amp", True)
+    model_cfg["gradient_checkpointing"] = train_cfg.get("gradient_checkpointing", True)
+    model_cfg["num_workers"] = train_cfg.get("num_workers", 2)
+    model_cfg["pin_memory"] = train_cfg.get("pin_memory", True)
+    model_cfg["prefetch_factor"] = train_cfg.get("prefetch_factor", 2)
 
     seed = cfg.get("seed", {}).get("global", 42)
     t_start = time.time()

@@ -54,13 +54,14 @@ class PolyChain(nn.Module):
                  cst_mean: Optional[list[float]] = None,
                  cst_std: Optional[list[float]] = None,
                  out_dim: int = 1,
-                 dropout: float = 0.2):
+                 dropout: float = 0.2,
+                 grad_checkpoint: bool = False):
         super().__init__()
         # 1. Shared backbone
         self.backbone = GINBackbone(
             in_dim=in_atom_dim, edge_dim=in_edge_dim,
             hidden_dim=hidden_dim, n_layers=n_backbone_layers,
-            dropout=dropout,
+            dropout=dropout, grad_checkpoint=grad_checkpoint,
         )
 
         # 2. HAMF (fuses 3 scale embeddings)

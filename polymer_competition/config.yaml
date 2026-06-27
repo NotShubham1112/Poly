@@ -38,6 +38,12 @@ data:
   target_type: "target_type"
   fail_policy: "warn"
 
+features:
+  polymer_descriptors: true
+  interaction_features: false
+  use_embeddings: false
+  embedding_model: null
+
 targets:
   tg:
     type: "tg"
@@ -49,6 +55,15 @@ cv:
   split_type: "group"
   group_strategy: "scaffold"
 
+training:
+  amp: true
+  gradient_checkpointing: true
+  num_workers: 2
+  pin_memory: true
+  prefetch_factor: 2
+  batch_size_search: true
+  grad_accumulation_steps: 2
+
 device:
   use_cuda: true
   gpu_id: 0
@@ -57,7 +72,8 @@ experiment:
   version: "v1"
 
 ensemble:
-  strategy: "inverse_rmse"
+  strategy: "auto"
+  stage2_threshold: 0.002
   min_weight: 0.0
   max_weight: 1.0
 
