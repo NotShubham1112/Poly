@@ -26,10 +26,11 @@ def set_seed(seed: int = 42, deterministic: bool = True) -> None:
 
 
 def save_checkpoint(state: dict, path: str | Path) -> None:
-    """Save a training checkpoint atomically."""
+    """Save a training checkpoint atomically with PID-unique temp file."""
+    import os as _os
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
+    tmp = path.parent / f".{path.name}.{_os.getpid()}.tmp"
     torch.save(state, tmp)
     if path.exists():
         path.unlink()

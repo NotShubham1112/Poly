@@ -726,6 +726,7 @@ def main():
                 preds.append(pred.cpu().numpy())
                 gts.append(batch.y.view(-1).cpu().numpy())
         pred_va = np.concatenate(preds)
+        ckpt_tag = f"{exp_ver}_{target}_{args.model_type}_fold{args.fold}"
 
     # Metrics
     y_va = va_df[target_col].values
