@@ -91,7 +91,7 @@ def main():
         json.dump({
             "experiment": exp,
             "target": target,
-            "strategy": args.strategy or cfg["ensemble"]["strategy"],
+            "strategy": strategy,
             "weights": dict(zip(model_names, w.round(4))),
             "cv_score": float(np.sqrt(np.mean((oof @ w - y) ** 2))),
         }, f, indent=2)

@@ -15,15 +15,17 @@ def load_oof_predictions(pred_dir, target, exp_ver="v1"):
     for pkl_path in sorted(pred_dir.glob(f"{exp_ver}_{target}_*_fold*.pkl")):
         with open(pkl_path, "rb") as f:
             data = pickle.load(f)
+        if pkl_path.stem.endswith("_test"):
+            continue
         parts = pkl_path.stem.split("_")
         model = parts[2]
         fold = int(parts[3].replace("fold", ""))
-        if "pred_va" not in data or "y_va" not in data:
+        if "pred" not in data or "y" not in data:
             continue
         if model not in oof_dict:
             oof_dict[model] = {"preds": {}, "targets": {}}
-        oof_dict[model]["preds"][fold] = np.array(data["pred_va"])
-        oof_dict[model]["targets"][fold] = np.array(data["y_va"])
+        oof_dict[model]["preds"][fold] = np.array(data["pred"])
+        oof_dict[model]["targets"][fold] = np.array(data["y"])
     return oof_dict
 
 

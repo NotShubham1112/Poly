@@ -25,14 +25,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 def load_all_predictions(pred_dir: Path) -> pd.DataFrame:
-    """Load all OOF .pkl files into a single DataFrame."""
+    """Load all OOF .pkl files into a single DataFrame. Skips _test.pkl files."""
     rows = []
     for pkl in sorted(pred_dir.glob("*.pkl")):
+        if pkl.stem.endswith("_test"):
+            continue
         with open(pkl, "rb") as f:
             data = pickle.load(f)
-        val_idx = np.asarray(data["val_idx"])
-        preds = np.asarray(data["pred"])
-        y = np.asarray(data["y"])
+        val_idx = np.asarray(data.get("val_idx", []))
+        preds = np.asarray(data.get("pred", []))
+        y = np.asarray(data.get("y", []))
+        if len(val_idx) == 0 or len(preds) == 0:
+            continue
         for idx, p, t in zip(val_idx, preds, y):
             rows.append({
                 "idx": int(idx),
