@@ -23,7 +23,13 @@ from rdkit import Chem
 
 os.environ["RDKIT_SKIP_VALIDATION_WARNINGS"] = "1"
 logging.getLogger("rdkit").setLevel(logging.ERROR)
-from torch_geometric.data import Data
+try:
+    from torch_geometric.data import Data
+except ImportError:
+    raise ImportError(
+        "PyTorch Geometric (torch_geometric) is required. "
+        "Install it with: conda install pyg -c pyg  or  pip install torch_geometric"
+    )
 
 
 # ----------------------------------------------------------------------------

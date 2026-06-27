@@ -61,6 +61,10 @@ ensemble:
   min_weight: 0.0
   max_weight: 1.0
 
+model_types:
+  polychain:
+    config: "models/polychain/configs/base.yaml"
+
 logging:
   level: "INFO"
   tensorboard: false

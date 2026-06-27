@@ -91,6 +91,7 @@ def build_model(model_type: str, cfg: dict, in_dim: int = None, edge_dim: int = 
                          hidden_dim=cfg.get("hidden_dim", 256),
                          n_backbone_layers=cfg.get("n_backbone_layers", 4),
                          n_hamf_layers=cfg.get("n_hamf_layers", 2),
+                         cst_dim=cfg.get("cst_dim", 32),
                          dropout=cfg.get("dropout", 0.2)), True
     raise ValueError(f"Unknown model_type: {model_type}")
 
@@ -308,7 +309,28 @@ def main():
         with open(args.model_config) as f:
             model_cfg = yaml.safe_load(f)
     else:
-        model_cfg = {}
+        # Fallback: read model config from config.yaml's model_types section
+        model_types = cfg.get("model_types", {})
+        mt_entry = model_types.get(args.model_type, {})
+        if isinstance(mt_entry, dict) and "config" in mt_entry:
+            config_path = mt_entry["config"]
+            if os.path.exists(config_path):
+                with open(config_path) as f:
+                    raw_cfg = yaml.safe_load(f)
+                # Flatten structured config sections (model, optimizer, scheduler, regularization)
+                # to top-level flat dict expected by training code
+                model_cfg = {}
+                for section in ("model", "optimizer", "scheduler", "regularization"):
+                    section_cfg = raw_cfg.get(section, {})
+                    if isinstance(section_cfg, dict):
+                        model_cfg.update(section_cfg)
+            else:
+                print(f"WARNING: model config path '{config_path}' not found. Using defaults.")
+                model_cfg = {}
+        elif isinstance(mt_entry, dict):
+            model_cfg = mt_entry
+        else:
+            model_cfg = {}
 
     seed = cfg.get("seed", {}).get("global", 42)
     t_start = time.time()
@@ -547,6 +569,7 @@ def main():
             "hidden_dim": model_cfg.get("hidden_dim", 256),
             "n_backbone_layers": model_cfg.get("n_backbone_layers", 4),
             "n_hamf_layers": model_cfg.get("n_hamf_layers", 2),
+            "cst_dim": model_cfg.get("cst_dim", 32),
         }
 
         model, best_val_rmse = train_graph(model, train_loader, val_loader,
@@ -565,6 +588,22 @@ def main():
                 pred = model(batch_dict)
                 preds.append(pred.cpu().numpy())
         pred_va = np.concatenate(preds)
+        # Save checkpoint for manifest recording
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        ckpt_tag = f"{exp_ver}_{target}_{args.model_type}_fold{args.fold}"
+        best_path = ckpt_dir / f"{ckpt_tag}_best.pt"
+        final_path = ckpt_dir / f"{ckpt_tag}_final.pt"
+        ckpt_payload = {
+            "model_state": model.state_dict(),
+            "model_type": args.model_type,
+            "fold": args.fold,
+            "epoch": 0,
+            "val_rmse": best_val_rmse,
+            "config": model_ckpt_cfg,
+        }
+        save_checkpoint(ckpt_payload, best_path)
+        save_checkpoint(ckpt_payload, final_path)
+        print(f"  Checkpoint saved -> {best_path}")
     else:
         # GNN baselines (GCN/GAT/MPNN/GraphTransformer/FusionNet)
         from features.graphs import smiles_to_graph

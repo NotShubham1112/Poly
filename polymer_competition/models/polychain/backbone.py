@@ -10,8 +10,14 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GINConv, global_add_pool
-from torch_geometric.utils import scatter
+try:
+    from torch_geometric.nn import GINConv, global_add_pool
+    from torch_geometric.utils import scatter
+except ImportError:
+    raise ImportError(
+        "PyTorch Geometric (torch_geometric) is required for PolyChain. "
+        "Install it with: conda install pyg -c pyg  or  pip install torch_geometric"
+    )
 
 
 # ----------------------------------------------------------------------------
