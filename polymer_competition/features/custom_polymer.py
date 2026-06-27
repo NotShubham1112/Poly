@@ -59,11 +59,12 @@ def _safe_mol(smiles: str) -> Chem.Mol | None:
 def _expand_to_chain(smiles: str, k: int = 3) -> str:
     """Build a k-repeat chain string from a polymer SMILES for end-group analysis.
 
-    We replace '*' with '[H]' (cap with hydrogen) to avoid dangling bonds,
+    Replace '*' (bare or bracketed) with '[H]' to avoid dangling bonds,
     then repeat k times joined by '.' (disconnected components).
     """
-    capped = smiles.replace("*", "[H]")
-    if not capped.replace("[H]", "").strip():
+    import re as _re
+    capped = _re.sub(r"\[\*\]|\*", "[H]", smiles)
+    if _re.sub(r"\[H\]", "", capped).strip() == "":
         return ""
     return ".".join([capped] * k)
 

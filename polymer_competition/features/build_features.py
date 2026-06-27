@@ -119,6 +119,11 @@ def build_features(config_path: str = "config.yaml") -> None:
     gc.collect()
 
     num_cols = [c for c in cache_df.columns if c != "canon_smiles" and cache_df[c].dtype != object]
+    # Replace inf with NaN before imputation (inf can't be cast to float32)
+    for col in num_cols:
+        col_vals = cache_df[col].values
+        if np.isinf(col_vals).any():
+            cache_df[col] = np.where(np.isinf(col_vals), np.nan, col_vals)
     imputer = SimpleImputer(strategy="median")
     cache_df[num_cols] = imputer.fit_transform(cache_df[num_cols]).astype(np.float32)
 
