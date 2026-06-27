@@ -72,7 +72,7 @@ def get_tree_model(model_type: str, **kwargs):
             random_seed=kwargs.get("random_state", 42),
             loss_function=kwargs.get("loss_function", "RMSE"),
             early_stopping_rounds=kwargs.get("early_stopping_rounds", 50),
-            task_type=kwargs.get("task_type", "GPU"),
+            task_type=kwargs.get("task_type", "CPU"),
             verbose=False,
         )
     raise ValueError(f"Unknown tree model: {model_type}")

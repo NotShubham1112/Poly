@@ -69,7 +69,7 @@ device:
   gpu_id: 0
 
 experiment:
-  version: "v19"
+  version: "v27"
 
 ensemble:
   strategy: "auto"

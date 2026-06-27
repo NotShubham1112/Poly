@@ -78,7 +78,10 @@ def main():
         return
     print(f"Using {len(model_names)} models with complete predictions: {model_names}")
 
-    w = get_weights(args.strategy or cfg["ensemble"]["strategy"], oof, y)
+    strategy = args.strategy
+    if strategy is None:
+        strategy = cfg.get("ensemble", {}).get("strategy", "auto")
+    w = get_weights(strategy, oof, y)
     print(f"Weights ({target}): {dict(zip(model_names, w.round(4)))}")
 
     weight_dir = Path("ensembles")

@@ -27,6 +27,26 @@ def load_oof_predictions(pred_dir, target, exp_ver="v1"):
     return oof_dict
 
 
+def get_weights(strategy: str, oof: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Get ensemble weights per strategy: 'uniform', 'auto', or 'optimize'."""
+    n = oof.shape[1]
+    if strategy in ("uniform", "equal"):
+        return np.ones(n) / n
+    if np.any(np.isnan(oof)) or np.any(np.isinf(oof)):
+        print("WARNING: NaN/Inf in OOF matrix, falling back to uniform weights")
+        return np.ones(n) / n
+    x0 = np.ones(n) / n
+    bounds = [(0, 1)] * n
+    constraints = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
+    result = minimize(objective, x0, args=(oof, y),
+                      method="SLSQP", bounds=bounds, constraints=constraints,
+                      options={"maxiter": 1000, "ftol": 1e-8})
+    if not result.success:
+        print(f"WARNING: Weight optimization failed ({result.message}), using uniform weights")
+        return np.ones(n) / n
+    return result.x
+
+
 def r2_score(y_true, y_pred):
     ss_res = np.sum((y_true - y_pred) ** 2)
     ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
