@@ -140,6 +140,9 @@ def train_graph(model, train_loader, val_loader, cfg, device, model_type="polych
     weight_decay = cfg.get("weight_decay", 1e-5)
     grad_clip = cfg.get("grad_clip", 1.0)
 
+    use_amp = device.type == "cuda" and cfg.get("amp", True)
+    scaler = torch.amp.GradScaler("cuda") if use_amp and device.type == "cuda" else None
+
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
     criterion = nn.MSELoss()
@@ -201,19 +204,37 @@ def train_graph(model, train_loader, val_loader, cfg, device, model_type="polych
         model.train()
         for batch_dict in train_loader:
             opt.zero_grad()
-            if model_type == "polychain":
-                batch_dict = move_to_device(batch_dict, device)
-                pred = model(batch_dict)
-                y = batch_dict["y"]
-                loss = criterion(pred, y.view(-1))
+            if use_amp:
+                with torch.amp.autocast("cuda"):
+                    if model_type == "polychain":
+                        batch_dict = move_to_device(batch_dict, device)
+                        pred = model(batch_dict)
+                        y = batch_dict["y"]
+                        loss = criterion(pred, y.view(-1))
+                    else:
+                        batch = batch_dict.to(device)
+                        pred = model(batch)
+                        y = batch.y.view(-1)
+                        loss = criterion(pred, y)
+                scaler.scale(loss).backward()
+                scaler.unscale_(opt)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                scaler.step(opt)
+                scaler.update()
             else:
-                batch = batch_dict.to(device)
-                pred = model(batch)
-                y = batch.y.view(-1)
-                loss = criterion(pred, y)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-            opt.step()
+                if model_type == "polychain":
+                    batch_dict = move_to_device(batch_dict, device)
+                    pred = model(batch_dict)
+                    y = batch_dict["y"]
+                    loss = criterion(pred, y.view(-1))
+                else:
+                    batch = batch_dict.to(device)
+                    pred = model(batch)
+                    y = batch.y.view(-1)
+                    loss = criterion(pred, y)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                opt.step()
         sched.step()
 
         # Auto-save recovery checkpoint
@@ -561,9 +582,13 @@ def main():
             return batch
 
         train_loader = DataLoader(train_samples, batch_size=model_cfg.get("batch_size", 32),
-                                  shuffle=True, collate_fn=collate)
+                                  shuffle=True, collate_fn=collate,
+                                  num_workers=2, pin_memory=True,
+                                  persistent_workers=True, prefetch_factor=2)
         val_loader = DataLoader(val_samples, batch_size=model_cfg.get("batch_size", 32),
-                                shuffle=False, collate_fn=collate)
+                                shuffle=False, collate_fn=collate,
+                                num_workers=2, pin_memory=True,
+                                persistent_workers=True, prefetch_factor=2)
 
         # Inspect first batch for dims
         first = next(iter(train_loader))
@@ -633,8 +658,12 @@ def main():
         edge_dim = train_graphs[0].edge_attr.size(1)
 
         PyGDL = PyGDataLoader if PyGDataLoader is not None else DataLoader
-        train_loader = PyGDL(train_graphs, batch_size=64, shuffle=True)
-        val_loader = PyGDL(val_graphs, batch_size=64, shuffle=False)
+        train_loader = PyGDL(train_graphs, batch_size=64, shuffle=True,
+                             num_workers=2, pin_memory=True,
+                             persistent_workers=True, prefetch_factor=2)
+        val_loader = PyGDL(val_graphs, batch_size=64, shuffle=False,
+                           num_workers=2, pin_memory=True,
+                           persistent_workers=True, prefetch_factor=2)
 
         model, _ = build_model(args.model_type, model_cfg, in_dim=in_dim, edge_dim=edge_dim)
         model = model.to(device)
@@ -728,7 +757,9 @@ def main():
                 batch["cst"] = torch.tensor(compute_cst_batch([s.smiles for s in samples]), dtype=torch.float)
                 return batch
 
-            test_loader = DataLoader(test_samples, batch_size=64, shuffle=False, collate_fn=collate)
+            test_loader = DataLoader(test_samples, batch_size=64, shuffle=False, collate_fn=collate,
+                                      num_workers=2, pin_memory=True,
+                                      persistent_workers=True, prefetch_factor=2)
             model.eval()
             test_preds = []
             with torch.no_grad():
@@ -742,7 +773,9 @@ def main():
             test_graphs = [smiles_to_graph(s) for s in test_feat["SMILES"].tolist()]
             test_graphs = [g for g in test_graphs if g is not None]
             from torch_geometric.loader import DataLoader as PyGDL
-            test_loader = PyGDL(test_graphs, batch_size=64, shuffle=False)
+            test_loader = PyGDL(test_graphs, batch_size=64, shuffle=False,
+                                 num_workers=2, pin_memory=True,
+                                 persistent_workers=True, prefetch_factor=2)
             model.eval()
             test_preds = []
             with torch.no_grad():
