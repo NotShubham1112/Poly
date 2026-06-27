@@ -33,7 +33,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 def run_eda(
     train_path: str,
     test_path: str | None = None,
-    target_col: str = "property",
+    target_col: str = "target",
+    smiles_col: str = "smiles",
     output_dir: str = "reports",
 ) -> dict:
     """Run full EDA and return a summary dict."""
@@ -122,8 +123,8 @@ def run_eda(
     print(f"\n{'─' * 50}")
     print("3. DUPLICATE SMILES")
     print(f"{'─' * 50}")
-    if "SMILES" in train.columns:
-        n_unique = train["SMILES"].nunique()
+    if smiles_col in train.columns:
+        n_unique = train[smiles_col].nunique()
         n_total = len(train)
         n_dupes = n_total - n_unique
         print(f"  Total SMILES:  {n_total}")
@@ -131,32 +132,32 @@ def run_eda(
         print(f"  Duplicates:    {n_dupes} ({n_dupes/n_total*100:.1f}%)")
 
         if n_dupes > 0 and target_col in train.columns:
-            dupe_smiles = train[train.duplicated("SMILES", keep=False)]
-            dupe_var = dupe_smiles.groupby("SMILES")[target_col].std()
+            dupe_smiles = train[train.duplicated(smiles_col, keep=False)]
+            dupe_var = dupe_smiles.groupby(smiles_col)[target_col].std()
             high_var = dupe_var[dupe_var > dupe_var.quantile(0.9)]
             if len(high_var) > 0:
                 print(f"  ⚠ {len(high_var)} duplicate groups have high target variance (>p90).")
                 print(f"    Max std within duplicates: {dupe_var.max():.4f}")
         results["duplicates"] = {"total": n_total, "unique": n_unique, "dupes": n_dupes}
     else:
-        print("  ⚠ No 'SMILES' column found.")
+        print(f"  ⚠ No '{smiles_col}' column found.")
 
     # ── 4. Train/test overlap & distribution drift ──
     print(f"\n{'─' * 50}")
     print("4. TRAIN/TEST DISTRIBUTION")
     print(f"{'─' * 50}")
-    if test is not None and "SMILES" in train.columns and "SMILES" in test.columns:
-        overlap = set(train["SMILES"]) & set(test["SMILES"])
+    if test is not None and smiles_col in train.columns and smiles_col in test.columns:
+        overlap = set(train[smiles_col]) & set(test[smiles_col])
         print(f"  SMILES overlap: {len(overlap)} molecules")
         if len(overlap) > 0:
-            print(f"  ⚠ LEAKAGE RISK: {len(overlap)} SMILES appear in both train and test!")
+            print(f"  ⚠ LEAKAGE RISK: {len(overlap)} {smiles_col} appear in both train and test!")
 
         # Fingerprint-based drift check
         try:
             from features.fingerprints import morgan_fingerprints
             from sklearn.decomposition import PCA
 
-            all_smi = train["SMILES"].tolist() + test["SMILES"].tolist()
+            all_smi = train[smiles_col].tolist() + test[smiles_col].tolist()
             fps = morgan_fingerprints(all_smi, radius=2, n_bits=512)  # smaller for speed
             pca = PCA(n_components=2, random_state=42)
             coords = pca.fit_transform(fps.astype(float))
@@ -209,8 +210,8 @@ def run_eda(
         else:
             print(f"  ✓ No obvious leakage from ID.")
     # Check if SMILES length correlates with target
-    if "SMILES" in train.columns and target_col in train.columns:
-        train["_smi_len"] = train["SMILES"].str.len()
+    if smiles_col in train.columns and target_col in train.columns:
+        train["_smi_len"] = train[smiles_col].str.len()
         corr_len = train["_smi_len"].corr(train[target_col])
         print(f"  SMILES length ↔ target correlation: {corr_len:.4f}")
         train.drop(columns=["_smi_len"], inplace=True)
@@ -237,12 +238,14 @@ def main():
     except FileNotFoundError:
         cfg = {}
 
+    data_cfg = cfg.get("data", {})
     data_dir = Path(cfg.get("paths", {}).get("data_dir", "data/"))
     train_path = args.train or str(data_dir / "train.csv")
     test_path = args.test or str(data_dir / "test.csv")
-    target_col = cfg.get("target", {}).get("column", "property")
+    target_col = data_cfg.get("target_col", "target")
+    smiles_col = data_cfg.get("smiles_col", "smiles")
 
-    run_eda(train_path, test_path, target_col)
+    run_eda(train_path, test_path, target_col=target_col, smiles_col=smiles_col)
 
 
 if __name__ == "__main__":

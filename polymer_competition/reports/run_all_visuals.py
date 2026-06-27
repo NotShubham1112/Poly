@@ -118,14 +118,15 @@ def generate_reportgenerator_plots(df: pd.DataFrame, output_dir: Path):
     print(f"  ReportGenerator plots saved to {output_dir}/")
 
 
-def generate_shap_and_error_analysis(pred_dir: Path, data_dir: Path, output_dir: Path):
+def generate_shap_and_error_analysis(pred_dir: Path, data_dir: Path, output_dir: Path,
+                                     target_col: str = "target", smiles_col: str = "smiles"):
     from reports.generate_reports import (
         generate_error_analysis,
         generate_model_summary,
         generate_shap_summary,
     )
     print("\n  --- SHAP Feature Importance ---")
-    generate_shap_summary(pred_dir, data_dir, output_dir)
+    generate_shap_summary(pred_dir, data_dir, output_dir, target_col, smiles_col)
     print("\n  --- Error Analysis ---")
     generate_error_analysis(pred_dir, output_dir)
     print("\n  --- Model Summary CSV ---")
@@ -144,6 +145,9 @@ def main():
     pred_dir = Path(cfg["paths"]["predictions_dir"])
     data_dir = Path(cfg["paths"]["data_dir"])
     exp = cfg.get("experiment", {}).get("version", "v1")
+    data_cfg = cfg.get("data", {})
+    target_col = data_cfg.get("target_col", "target")
+    smiles_col = data_cfg.get("smiles_col", "smiles")
     reports_dir = Path("reports")
     plots_dir = reports_dir / "plots"
 
@@ -165,7 +169,7 @@ def main():
         print("  Skipped — no predictions loaded.")
 
     print("\n[3/3] SHAP, error analysis, model summary...")
-    generate_shap_and_error_analysis(pred_dir, data_dir, reports_dir)
+    generate_shap_and_error_analysis(pred_dir, data_dir, reports_dir, target_col, smiles_col)
 
     print("\n" + "=" * 60)
     print("  ALL VISUALIZATIONS COMPLETE")
