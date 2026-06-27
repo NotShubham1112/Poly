@@ -123,6 +123,15 @@ def test_polymer_descriptors_all_keys():
     assert len(result) == len(expected_keys)
 
 
+def test_graph_feature_dims():
+    from features.graphs import smiles_to_graph
+    g = smiles_to_graph("C=CC(C)C(=O)OC")
+    assert g is not None
+    assert g.x.shape[1] == 51, f"Expected 51 atom features, got {g.x.shape[1]}"
+    assert g.edge_attr.shape[1] == 14, f"Expected 14 bond features, got {g.edge_attr.shape[1]}"
+    print(f"Atom feats: {g.x.shape[1]}, Bond feats: {g.edge_attr.shape[1]} - OK")
+
+
 def test_feature_cache_metadata():
     """After building features, metadata file exists with version info."""
     from pathlib import Path

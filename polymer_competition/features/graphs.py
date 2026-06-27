@@ -77,6 +77,7 @@ def atom_features(atom: Chem.rdchem.Atom) -> list[int | float]:
         + _onek(int(atom.GetHybridization()), HYBRIDIZATIONS)
         + [int(atom.GetIsAromatic()), int(atom.IsInRing())]
         + [atom.GetMass() * 0.01]
+        + [min(atom.GetValence(Chem.rdchem.IMPLICIT), 4) / 4.0]
     )
 
 
@@ -87,8 +88,8 @@ BOND_TYPES = [
     Chem.rdchem.BondType.AROMATIC,
 ]
 
-# Bond feature dimension: one-hot(5) + [conjugated, in_ring, is_boundary](3) = 8
-BOND_FEAT_DIM = len(BOND_TYPES) + 1 + 3  # 8
+# Bond feature dimension: one-hot(5) + [conjugated, in_ring, is_boundary](3) + stereo(6) = 14
+BOND_FEAT_DIM = len(BOND_TYPES) + 1 + 3 + 6  # 14
 
 
 def bond_features(bond: Chem.rdchem.Bond, is_boundary: bool = False) -> list[int | float]:
@@ -98,6 +99,18 @@ def bond_features(bond: Chem.rdchem.Bond, is_boundary: bool = False) -> list[int
         _onek(bt_idx, BOND_TYPES)
         + [int(bond.GetIsConjugated()), int(bond.IsInRing()), int(is_boundary)]
     )
+    # Stereo configuration
+    stereo = bond.GetStereo()
+    feat.extend([
+        1.0 if stereo == Chem.BondStereo.STEREOANY else 0.0,
+        1.0 if stereo == Chem.BondStereo.STEREOE else 0.0,
+        1.0 if stereo == Chem.BondStereo.STEREOZ else 0.0,
+        1.0 if stereo == Chem.BondStereo.STEREOCIS else 0.0,
+        1.0 if stereo == Chem.BondStereo.STEREOTRANS else 0.0,
+        1.0 if stereo not in (Chem.BondStereo.STEREOANY, Chem.BondStereo.STEREOE,
+                              Chem.BondStereo.STEREOZ, Chem.BondStereo.STEREOCIS,
+                              Chem.BondStereo.STEREOTRANS) else 0.0,
+    ])
     assert len(feat) == BOND_FEAT_DIM, (
         f"bond_features returned {len(feat)} dims, expected {BOND_FEAT_DIM}"
     )
@@ -273,8 +286,8 @@ def periodic_graph(smiles: str, k: int = 1, y: Optional[float] = None) -> Option
                             dtype=torch.long)
     km.edge_index = torch.cat([km.edge_index, new_edge], dim=1)
 
-    # UNK bond type (one-hot [0,0,0,0,1]), not conjugated, not in ring, is_boundary=True
-    new_attr = torch.tensor([[0, 0, 0, 0, 1, 0, 0, 1]] * 2, dtype=torch.float)
+    # UNK bond type (one-hot [0,0,0,0,1]), not conjugated, not in ring, is_boundary=True, no stereo (=other)
+    new_attr = torch.tensor([[0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1]] * 2, dtype=torch.float)
     km.edge_attr = torch.cat([km.edge_attr, new_attr], dim=0)
     assert km.edge_attr.size(1) == BOND_FEAT_DIM, (
         f"periodic_graph edge_attr dim {km.edge_attr.size(1)} != {BOND_FEAT_DIM}"
