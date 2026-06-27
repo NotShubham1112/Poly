@@ -3,12 +3,13 @@ from __future__ import annotations
 import argparse
 import pickle
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
 import yaml
 from sklearn.metrics import r2_score
-from sklearn.model_selection import KFold, cross_val_score
+from sklearn.model_selection import cross_val_score
 
 
 def load_oof_predictions(pred_dir: Path, exp: str, target: str) -> pd.DataFrame:
@@ -68,6 +69,69 @@ def load_test_predictions(pred_dir: Path, exp: str, target: str) -> pd.DataFrame
     return pd.DataFrame(rows)
 
 
+def select_best_meta(oof: np.ndarray, y: np.ndarray,
+                     model_names: list[str]) -> tuple[Any, str, float]:
+    from catboost import CatBoostRegressor
+    from sklearn.linear_model import RidgeCV, ElasticNetCV
+    from xgboost import XGBRegressor
+
+    candidates = {
+        "ridge": RidgeCV(alphas=[0.01, 0.1, 1.0, 10.0]),
+        "xgb": XGBRegressor(n_estimators=300, max_depth=3,
+                            learning_rate=0.1, random_state=42,
+                            n_jobs=-1),
+        "catboost": CatBoostRegressor(iterations=500, depth=3,
+                                       learning_rate=0.1, verbose=0,
+                                       random_seed=42),
+        "elasticnet": ElasticNetCV(l1_ratio=[.1, .5, .7, .9, .95, .99, 1.0],
+                                    alphas=[0.01, 0.1, 1.0, 10.0],
+                                    max_iter=5000, random_state=42),
+    }
+
+    best_score, best_name, best_model = -np.inf, None, None
+    results = {}
+    for name, meta in candidates.items():
+        scores = cross_val_score(meta, oof, y, cv=min(5, len(oof) // 2),
+                                  scoring="r2", n_jobs=-1)
+        mean_score = scores.mean()
+        results[name] = mean_score
+        print(f"  {name}: CV R² = {mean_score:.4f} (std={scores.std():.4f})")
+        if mean_score > best_score:
+            best_score = mean_score
+            best_name = name
+            best_model = meta
+
+    print(f"  Best: {best_name} (R² = {best_score:.4f})")
+    best_model.fit(oof, y)
+    return best_model, best_name, best_score
+
+
+def try_stage2_stacking(oof: np.ndarray, y: np.ndarray,
+                         stage1_model, stage1_score: float,
+                         model_names: list[str]) -> tuple[Any, float]:
+    """Train a second-level model if it improves CV by >0.002."""
+    from sklearn.linear_model import RidgeCV
+    from xgboost import XGBRegressor
+
+    # Level 1 predictions
+    oof_l1 = stage1_model.predict(oof).reshape(-1, 1)
+
+    # Level 2: Ridge on L1 predictions + original features
+    oof_l2 = np.concatenate([oof, oof_l1], axis=1)
+    l2_model = RidgeCV(alphas=[0.01, 0.1, 1.0, 10.0])
+    l2_score = cross_val_score(l2_model, oof_l2, y, cv=min(5, len(oof) // 2),
+                                scoring="r2", n_jobs=-1).mean()
+
+    print(f"  Stage-2 CV R² = {l2_score:.4f} (improvement: {l2_score - stage1_score:.4f})")
+    if l2_score > stage1_score + 0.002:
+        print("  -> Using Stage-2 stacking")
+        l2_model.fit(oof_l2, y)
+        return l2_model, l2_score
+
+    print("  -> Stage-2 not beneficial, keeping Stage-1")
+    return None, stage1_score
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config.yaml")
@@ -102,26 +166,23 @@ def main():
         return
     print(f"OOF matrix: {oof.shape} with models: {model_names}")
 
-    if args.meta == "xgb":
-        from xgboost import XGBRegressor
-        meta = XGBRegressor(n_estimators=200, max_depth=3, learning_rate=0.1, random_state=42)
-    else:
-        from sklearn.linear_model import RidgeCV
-        meta = RidgeCV(alphas=[0.01, 0.1, 1.0, 10.0])
-
-    cv = KFold(n_splits=5, shuffle=True, random_state=42)
-    cv_scores = cross_val_score(meta, oof, y, cv=cv, scoring="r2")
-    for i, score in enumerate(cv_scores):
-        print(f"  Fold {i} R²: {score:.4f}")
-    print(f"CV R²: {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
-
-    meta.fit(oof, y)
-    train_r2 = r2_score(y, meta.predict(oof))
+    meta_model, meta_name, meta_score = select_best_meta(oof, y, model_names)
+    train_r2 = r2_score(y, meta_model.predict(oof))
     print(f"Train R² (full OOF): {train_r2:.4f}")
 
+    # Stage-2 stacking (conditional)
+    stage2_model, final_score = try_stage2_stacking(oof, y, meta_model, meta_score, model_names)
+
+    # Save meta-model info
     model_path = ensemble_dir / f"stacking_{target}.pkl"
     with open(model_path, "wb") as f:
-        pickle.dump({"meta": meta, "model_names": model_names, "meta_type": args.meta}, f)
+        pickle.dump({
+            "meta": meta_model,
+            "meta_name": meta_name,
+            "stage2": stage2_model,
+            "cv_score": final_score,
+            "model_names": model_names,
+        }, f)
     print(f"Meta-model saved -> {model_path}")
 
     test_df = load_test_predictions(pred_dir, exp, target)
@@ -139,12 +200,19 @@ def main():
         print("Warning: NaN values in test predictions; filling with column mean.")
         test_pivot = test_pivot.fillna(test_pivot.mean())
 
-    test_preds = meta.predict(test_pivot.values)
+    if stage2_model is not None:
+        # Stage-2: L1 predictions + original features
+        l1_preds = meta_model.predict(test_pivot.values).reshape(-1, 1)
+        test_input = np.concatenate([test_pivot.values, l1_preds], axis=1)
+        test_preds = stage2_model.predict(test_input)
+    else:
+        test_preds = meta_model.predict(test_pivot.values)
+
     submission = pd.DataFrame({"id": test_pivot.index, "target": test_preds})
     sub_path = sub_dir / f"{exp}_{target}_stacking.csv"
     submission.to_csv(sub_path, index=False)
     print(f"Submission for {target} -> {sub_path}")
-    print(f"CV R²: {cv_scores.mean():.4f}")
+    print(f"CV R²: {final_score:.4f}")
 
 
 if __name__ == "__main__":
