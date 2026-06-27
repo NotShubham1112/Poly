@@ -13,6 +13,8 @@ import argparse
 import json
 import os
 import pickle
+import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -32,6 +34,26 @@ from .train_utils import (
     MetricTracker, rmse, mae, r2_score, spearman,
 )
 from sklearn.preprocessing import StandardScaler
+
+
+def _gpu_monitor(interval: float = 30.0, log_path: str = "outputs/logs/gpu_util.csv"):
+    import csv
+    Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["timestamp", "util_pct", "memory_mb"])
+    while getattr(_gpu_monitor, "_running", True):
+        try:
+            result = subprocess.check_output(
+                "nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader",
+                shell=True
+            ).decode().strip()
+            parts = result.replace("%", "").replace(" MiB", "").split(", ")
+            with open(log_path, "a", newline="") as f:
+                csv.writer(f).writerow([time.time(), parts[0], parts[1]])
+        except Exception:
+            pass
+        time.sleep(interval)
 
 
 def _build_ckpt_meta(model_type, fold, epoch, val_rmse, cfg, extra=None):
@@ -380,6 +402,11 @@ def main():
             use_cuda = False
     device = torch.device("cuda" if use_cuda else "cpu")
     print(f"Device: {device}")
+
+    _gpu_monitor._running = True
+    monitor_thread = threading.Thread(target=_gpu_monitor, daemon=True)
+    monitor_thread.start()
+
     target_col = cfg["data"]["target_col"]
     exp_ver = cfg.get("experiment", {}).get("version", "v1")
     ckpt_dir = Path(cfg["paths"].get("checkpoints_dir", "outputs/checkpoints/"))
@@ -796,6 +823,11 @@ def main():
             }, f)
         print(f"Test predictions saved -> {test_out}")
 
+
+    _gpu_monitor._running = False
+    monitor_thread.join(timeout=5)
+    if torch.cuda.is_available():
+        print(f"Peak GPU memory: {torch.cuda.max_memory_allocated() / 1e9:.2f} GB")
 
 if __name__ == "__main__":
     main()
