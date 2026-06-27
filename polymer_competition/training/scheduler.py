@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -104,28 +105,20 @@ class ExperimentScheduler:
             print(f"  Budget: removing {removed.model_type}/{removed.target}/fold{removed.fold}")
         return runs_sorted
 
-    def launch_run(self, run: RunSpec) -> bool:
-        cuda_visible = ""
-        if run.device.startswith("cuda:"):
-            cuda_visible = f"CUDA_VISIBLE_DEVICES={run.device[-1]}"
-        elif run.device == "cuda" and run.model_type in ("polychain", "polychain_deep"):
-            cuda_visible = "CUDA_VISIBLE_DEVICES=0"
-
+    def launch_run(self, run: RunSpec) -> subprocess.Popen:
+        """Launch a training run asynchronously. Returns Popen handle."""
         cmd_parts = []
-        if cuda_visible:
-            cmd_parts.append(cuda_visible)
+        env = os.environ.copy()
+        if run.device.startswith("cuda:"):
+            env["CUDA_VISIBLE_DEVICES"] = run.device.split(":")[1]
+        elif run.device == "cuda":
+            env["CUDA_VISIBLE_DEVICES"] = "0"
         cmd_parts.append(f"python -m training.train --model_type {run.model_type}")
         cmd_parts.append(f"--target {run.target} --fold {run.fold}")
         cmd_parts.append(f"--config config.yaml")
-
         cmd = " ".join(cmd_parts)
-        print(f"  Launching: {cmd}")
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-        if result.returncode != 0:
-            print(f"  FAILED (code {result.returncode}): {result.stderr[:200]}")
-            return False
-        print(f"  Completed: {run.model_type}/{run.target}/fold{run.fold}")
-        return True
+        print(f"  Launching: {cmd} (CUDA_VISIBLE_DEVICES={env.get('CUDA_VISIBLE_DEVICES', '')})")
+        return subprocess.Popen(cmd, shell=True, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def run_all(self, targets: Optional[list[str]] = None,
                  model_types: Optional[list[str]] = None,
@@ -147,10 +140,19 @@ class ExperimentScheduler:
                 continue
             print(f"\nBatch {batch_idx + 1} ({len(batch_runs)} runs): {batch_models}")
 
+            processes = []
             for run in batch_runs:
-                success = self.launch_run(run)
-                if not success:
-                    print(f"  WARNING: {run.model_type}/{run.target}/fold{run.fold} failed")
+                proc = self.launch_run(run)
+                processes.append((run, proc))
+
+            for run, proc in processes:
+                stdout, stderr = proc.communicate()
+                if proc.returncode != 0:
+                    print(f"  FAILED: {run.model_type}/{run.target}/fold{run.fold} (code {proc.returncode})")
+                    if stderr:
+                        print(f"  stderr: {stderr.decode()[:200]}")
+                else:
+                    print(f"  Completed: {run.model_type}/{run.target}/fold{run.fold}")
 
 
 def main():
