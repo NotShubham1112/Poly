@@ -136,8 +136,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--target", required=True, help="Target name (tg/egc)")
-    parser.add_argument("--meta", default="xgb", choices=["xgb", "ridge"],
-                        help="Meta-model type")
     parser.add_argument("--exp", default=None, help="Experiment version override")
     args = parser.parse_args()
 
