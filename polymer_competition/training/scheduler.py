@@ -150,9 +150,15 @@ class ExperimentScheduler:
                 if proc.returncode != 0:
                     print(f"  FAILED: {run.model_type}/{run.target}/fold{run.fold} (code {proc.returncode})")
                     if stderr:
-                        print(f"  stderr: {stderr.decode()[:200]}")
+                        print(f"  stderr:\n{stderr.decode()}")
+                    if stdout:
+                        print(f"  stdout:\n{stdout.decode()}")
                 else:
                     print(f"  Completed: {run.model_type}/{run.target}/fold{run.fold}")
+                    if stdout:
+                        lines = stdout.decode().split('\n')
+                        for line in lines[-10:]:
+                            print(f"  {line}")
 
 
 def main():
