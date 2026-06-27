@@ -6,7 +6,7 @@
 
 project:
   name: "polymer_competition"
-  version: "1.1.0"
+  version: "1.2.0"
 
 paths:
   data_dir: "data/"
@@ -38,6 +38,12 @@ data:
   target_type: "target_type"
   fail_policy: "warn"
 
+features:
+  polymer_descriptors: true
+  interaction_features: false
+  use_embeddings: false
+  embedding_model: null
+
 targets:
   tg:
     type: "tg"
@@ -49,17 +55,47 @@ cv:
   split_type: "group"
   group_strategy: "scaffold"
 
+training:
+  amp: true
+  gradient_checkpointing: true
+  num_workers: 2
+  pin_memory: true
+  prefetch_factor: 2
+  batch_size_search: true
+  grad_accumulation_steps: 2
+
 device:
   use_cuda: true
   gpu_id: 0
 
 experiment:
-  version: "v1"
+  version: "v19"
 
 ensemble:
-  strategy: "inverse_rmse"
+  strategy: "auto"
+  stage2_threshold: 0.002
   min_weight: 0.0
   max_weight: 1.0
+
+model_types:
+  polychain:
+    config: "models/polychain/configs/base.yaml"
+  polychain_deep:
+    extends: "models/polychain/configs/base.yaml"
+    overrides:
+      n_backbone_layers: 6
+      n_hamf_layers: 3
+      hidden_dim: 384
+  polychain_wide:
+    extends: "models/polychain/configs/base.yaml"
+    overrides:
+      hidden_dim: 512
+  polychain_light:
+    extends: "models/polychain/configs/base.yaml"
+    overrides:
+      n_backbone_layers: 3
+      n_hamf_layers: 1
+      hidden_dim: 128
 
 logging:
   level: "INFO"

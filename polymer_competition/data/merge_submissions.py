@@ -12,9 +12,16 @@ def merge_submissions(
     egc_csv: str | Path,
     output_csv: str | Path,
 ) -> pd.DataFrame:
-    tg = pd.read_csv(tg_csv)
-    egc = pd.read_csv(egc_csv)
-    combined = pd.concat([tg, egc], axis=0)
+    parts = []
+    for label, path in [("tg", tg_csv), ("egc", egc_csv)]:
+        p = Path(path)
+        if p.exists():
+            parts.append(pd.read_csv(p))
+        else:
+            print(f"WARNING: {label} submission not found at {p}. Skipping.")
+    if not parts:
+        raise FileNotFoundError("No submission files found to merge.")
+    combined = pd.concat(parts, axis=0)
     combined = combined.sort_values("id").reset_index(drop=True)
     combined = combined[["id", "target"]]
     output_path = Path(output_csv)

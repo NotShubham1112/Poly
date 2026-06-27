@@ -1,67 +1,111 @@
-"""
-ensemble.weight_optimizer.py
-Strategies for combining OOF predictions from multiple models.
-"""
-from __future__ import annotations
-
-from typing import List
+import argparse
+import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
-from sklearn.linear_model import Ridge
 
 
-def inverse_rmse_weights(oof_preds: np.ndarray, y_true: np.ndarray,
-                          min_w: float = 0.0, max_w: float = 1.0) -> np.ndarray:
-    """Weights proportional to 1/RMSE per model, then normalized.
-
-    Parameters
-    ----------
-    oof_preds : (n_samples, n_models)
-    y_true    : (n_samples,)
-    """
-    rmses = np.sqrt(np.mean((oof_preds - y_true[:, None]) ** 2, axis=0))
-    inv = 1.0 / (rmses + 1e-8)
-    w = inv / inv.sum()
-    w = np.clip(w, min_w, max_w)
-    w = w / w.sum()
-    return w
-
-
-def nelder_mead_weights(oof_preds: np.ndarray, y_true: np.ndarray,
-                        min_w: float = 0.0, max_w: float = 1.0) -> np.ndarray:
-    """Find non-negative weights minimizing RMSE of the weighted blend."""
-    n_models = oof_preds.shape[1]
-
-    def loss(w):
-        w = np.clip(w, 0, None)
-        w = w / w.sum() if w.sum() > 0 else np.ones_like(w) / len(w)
-        return np.sqrt(np.mean((oof_preds @ w - y_true) ** 2))
-
-    x0 = np.ones(n_models) / n_models
-    res = minimize(loss, x0, method="Nelder-Mead",
-                   options={"xatol": 1e-5, "fatol": 1e-7, "maxiter": 5000})
-    w = np.clip(res.x, min_w, max_w)
-    w = w / w.sum()
-    return w
+def load_oof_predictions(pred_dir, target, exp_ver="v1"):
+    import pickle
+    pred_dir = Path(pred_dir)
+    models = []
+    oof_dict = {}
+    for pkl_path in sorted(pred_dir.glob(f"{exp_ver}_{target}_*_fold*.pkl")):
+        with open(pkl_path, "rb") as f:
+            data = pickle.load(f)
+        parts = pkl_path.stem.split("_")
+        model = parts[2]
+        fold = int(parts[3].replace("fold", ""))
+        if "pred_va" not in data or "y_va" not in data:
+            continue
+        if model not in oof_dict:
+            oof_dict[model] = {"preds": {}, "targets": {}}
+        oof_dict[model]["preds"][fold] = np.array(data["pred_va"])
+        oof_dict[model]["targets"][fold] = np.array(data["y_va"])
+    return oof_dict
 
 
-def stacking_ridge(oof_preds: np.ndarray, y_true: np.ndarray,
-                   alpha: float = 1.0) -> np.ndarray:
-    """Fit a Ridge meta-learner on OOF predictions; return its coefficients."""
-    ridge = Ridge(alpha=alpha, positive=True)
-    ridge.fit(oof_preds, y_true)
-    w = ridge.coef_
-    w = w / w.sum() if w.sum() > 0 else np.ones_like(w) / len(w)
-    return w
+def r2_score(y_true, y_pred):
+    ss_res = np.sum((y_true - y_pred) ** 2)
+    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+    return 1 - ss_res / (ss_tot + 1e-12)
 
 
-def get_weights(strategy: str, oof_preds: np.ndarray, y_true: np.ndarray) -> np.ndarray:
-    if strategy == "inverse_rmse":
-        return inverse_rmse_weights(oof_preds, y_true)
-    if strategy == "nelder_mead":
-        return nelder_mead_weights(oof_preds, y_true)
-    if strategy == "stacking":
-        return stacking_ridge(oof_preds, y_true)
-    raise ValueError(f"Unknown strategy: {strategy}")
+def objective(weights, preds_matrix, y_true):
+    blended = preds_matrix @ weights
+    return -r2_score(y_true, blended)
+
+
+def optimize_weights(oof_dict, n_folds=5):
+    models = list(oof_dict.keys())
+    n_models = len(models)
+    if n_models == 0:
+        return None, None
+    all_preds = []
+    all_y = []
+    for fold in range(n_folds):
+        fold_preds = []
+        for model in models:
+            if fold not in oof_dict[model]["preds"]:
+                break
+            fold_preds.append(oof_dict[model]["preds"][fold])
+        if len(fold_preds) != n_models:
+            continue
+        fold_preds = np.column_stack(fold_preds)
+        all_preds.append(fold_preds)
+        all_y.append(oof_dict[models[0]]["targets"][fold])
+    all_preds = np.vstack(all_preds)
+    all_y = np.concatenate(all_y)
+    n = all_preds.shape[1]
+    x0 = np.ones(n) / n
+    bounds = [(0, 1)] * n
+    constraints = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
+    result = minimize(objective, x0, args=(all_preds, all_y),
+                      method="SLSQP", bounds=bounds, constraints=constraints,
+                      options={"maxiter": 1000, "ftol": 1e-8})
+    best_r2 = -result.fun
+    weights = result.x
+    return dict(zip(models, [float(w) for w in weights])), float(f"{best_r2:.4f}")
+
+
+def save_weights(target, weights, score, out_dir="ensembles"):
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"weights_{target}.json"
+    payload = {"target": target, "weights": weights, "val_r2": score}
+    with open(out_path, "w") as f:
+        json.dump(payload, f, indent=2)
+    print(f"  Saved weights -> {out_path}")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--target", default=None)
+    parser.add_argument("--all", action="store_true")
+    parser.add_argument("--predictions_dir", default="predictions")
+    parser.add_argument("--exp_ver", default="v1")
+    parser.add_argument("--n_folds", type=int, default=5)
+    args = parser.parse_args()
+
+    targets = [args.target] if args.target else (["tg", "egc"] if args.all else ["tg", "egc"])
+    for target in targets:
+        print(f"\n=== Optimizing weights for {target} ===")
+        oof = load_oof_predictions(args.predictions_dir, target, args.exp_ver)
+        if not oof:
+            print(f"  No OOF predictions found for {target}")
+            continue
+        print(f"  Models found: {list(oof.keys())}")
+        weights, score = optimize_weights(oof, args.n_folds)
+        if weights is None:
+            print(f"  Could not optimize (insufficient data)")
+            continue
+        print(f"  Best R²: {score}")
+        for model, w in sorted(weights.items(), key=lambda x: -x[1]):
+            print(f"    {model}: {w:.3f}")
+        save_weights(target, weights, score)
+
+
+if __name__ == "__main__":
+    main()

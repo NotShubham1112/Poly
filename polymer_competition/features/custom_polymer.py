@@ -59,15 +59,14 @@ def _safe_mol(smiles: str) -> Chem.Mol | None:
 def _expand_to_chain(smiles: str, k: int = 3) -> str:
     """Build a k-repeat chain string from a polymer SMILES for end-group analysis.
 
-    We remove '*' and repeat the rest k times, joining with 'C' (aliphatic
-    carbon) to mimic a polymer chain.
+    Replace '*' (bare or bracketed) with '[H]' to avoid dangling bonds,
+    then repeat k times joined by '.' (disconnected components).
     """
-    # Strip asterisks
-    cleaned = smiles.replace("*", "")
-    if not cleaned:
+    import re as _re
+    capped = _re.sub(r"\[\*\]|\*", "[H]", smiles)
+    if _re.sub(r"\[H\]", "", capped).strip() == "":
         return ""
-    # Repeat k times joined by C-C bond
-    return ".".join([cleaned] * k)
+    return ".".join([capped] * k)
 
 
 def asterisks_count(smiles: str) -> int:

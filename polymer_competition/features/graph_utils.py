@@ -11,7 +11,13 @@ from __future__ import annotations
 from typing import Optional
 
 import torch
-from torch_geometric.data import Batch, Data
+try:
+    from torch_geometric.data import Batch, Data
+except ImportError:
+    raise ImportError(
+        "PyTorch Geometric (torch_geometric) is required. "
+        "Install it with: conda install pyg -c pyg  or  pip install torch_geometric"
+    )
 
 from .graphs import (
     smiles_to_graph,
@@ -61,13 +67,13 @@ def collate_multiscale(samples: list[MultiScaleSample]) -> dict:
     dict with keys 'monomer', 'dimer', 'trimer', 'periodic', 'y', 'smiles'.
     """
     if not samples:
-        return {}
+        raise ValueError("collate_multiscale received empty sample list")
     valid = []
     for s in samples:
         if s.monomer is not None and s.dimer is not None and s.trimer is not None and s.periodic is not None:
             valid.append(s)
     if not valid:
-        return {}
+        raise ValueError("No valid samples in batch after filtering None graphs")
     return {
         "monomer":  Batch.from_data_list([s.monomer  for s in valid]),
         "dimer":    Batch.from_data_list([s.dimer    for s in valid]),

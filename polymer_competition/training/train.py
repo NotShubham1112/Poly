@@ -13,6 +13,8 @@ import argparse
 import json
 import os
 import pickle
+import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -32,6 +34,26 @@ from .train_utils import (
     MetricTracker, rmse, mae, r2_score, spearman,
 )
 from sklearn.preprocessing import StandardScaler
+
+
+def _gpu_monitor(interval: float = 30.0, log_path: str = "outputs/logs/gpu_util.csv"):
+    import csv
+    Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["timestamp", "util_pct", "memory_mb"])
+    while getattr(_gpu_monitor, "_running", True):
+        try:
+            result = subprocess.check_output(
+                "nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader",
+                shell=True
+            ).decode().strip()
+            parts = result.replace("%", "").replace(" MiB", "").split(", ")
+            with open(log_path, "a", newline="") as f:
+                csv.writer(f).writerow([time.time(), parts[0], parts[1]])
+        except Exception:
+            pass
+        time.sleep(interval)
 
 
 def _build_ckpt_meta(model_type, fold, epoch, val_rmse, cfg, extra=None):
@@ -85,13 +107,15 @@ def build_model(model_type: str, cfg: dict, in_dim: int = None, edge_dim: int = 
         return PolymerFusionNet(n_modalities=cfg.get("n_modalities", 5),
                                 dim=cfg.get("dim", 256),
                                 n_layers=cfg.get("n_layers", 2)), True
-    if model_type == "polychain":
+    if model_type == "polychain" or model_type.startswith("polychain_"):
         from models.polychain import PolyChain
         return PolyChain(in_atom_dim=in_dim, in_edge_dim=edge_dim,
                          hidden_dim=cfg.get("hidden_dim", 256),
                          n_backbone_layers=cfg.get("n_backbone_layers", 4),
                          n_hamf_layers=cfg.get("n_hamf_layers", 2),
-                         dropout=cfg.get("dropout", 0.2)), True
+                         cst_dim=cfg.get("cst_dim", 32),
+                         dropout=cfg.get("dropout", 0.2),
+                         grad_checkpoint=cfg.get("gradient_checkpointing", True)), True
     raise ValueError(f"Unknown model_type: {model_type}")
 
 
@@ -138,6 +162,9 @@ def train_graph(model, train_loader, val_loader, cfg, device, model_type="polych
     lr = cfg.get("lr", 1e-4)
     weight_decay = cfg.get("weight_decay", 1e-5)
     grad_clip = cfg.get("grad_clip", 1.0)
+
+    use_amp = device.type == "cuda" and cfg.get("amp", True)
+    scaler = torch.amp.GradScaler("cuda") if use_amp and device.type == "cuda" else None
 
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
@@ -200,19 +227,37 @@ def train_graph(model, train_loader, val_loader, cfg, device, model_type="polych
         model.train()
         for batch_dict in train_loader:
             opt.zero_grad()
-            if model_type == "polychain":
-                batch_dict = move_to_device(batch_dict, device)
-                pred = model(batch_dict)
-                y = batch_dict["y"]
-                loss = criterion(pred, y.view(-1))
+            if use_amp:
+                with torch.amp.autocast("cuda"):
+                    if model_type == "polychain":
+                        batch_dict = move_to_device(batch_dict, device)
+                        pred = model(batch_dict)
+                        y = batch_dict["y"]
+                        loss = criterion(pred, y.view(-1))
+                    else:
+                        batch = batch_dict.to(device)
+                        pred = model(batch)
+                        y = batch.y.view(-1)
+                        loss = criterion(pred, y)
+                scaler.scale(loss).backward()
+                scaler.unscale_(opt)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                scaler.step(opt)
+                scaler.update()
             else:
-                batch = batch_dict.to(device)
-                pred = model(batch)
-                y = batch.y.view(-1)
-                loss = criterion(pred, y)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-            opt.step()
+                if model_type == "polychain":
+                    batch_dict = move_to_device(batch_dict, device)
+                    pred = model(batch_dict)
+                    y = batch_dict["y"]
+                    loss = criterion(pred, y.view(-1))
+                else:
+                    batch = batch_dict.to(device)
+                    pred = model(batch)
+                    y = batch.y.view(-1)
+                    loss = criterion(pred, y)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                opt.step()
         sched.step()
 
         # Auto-save recovery checkpoint
@@ -308,13 +353,69 @@ def main():
         with open(args.model_config) as f:
             model_cfg = yaml.safe_load(f)
     else:
-        model_cfg = {}
+        # Fallback: read model config from config.yaml's model_types section
+        model_types = cfg.get("model_types", {})
+        mt_entry = model_types.get(args.model_type, {})
+        if isinstance(mt_entry, dict) and "config" in mt_entry:
+            config_path = mt_entry["config"]
+            if os.path.exists(config_path):
+                with open(config_path) as f:
+                    raw_cfg = yaml.safe_load(f)
+                # Flatten structured config sections (model, optimizer, scheduler, regularization)
+                # to top-level flat dict expected by training code
+                model_cfg = {}
+                for section in ("model", "optimizer", "scheduler", "regularization"):
+                    section_cfg = raw_cfg.get(section, {})
+                    if isinstance(section_cfg, dict):
+                        model_cfg.update(section_cfg)
+            else:
+                print(f"WARNING: model config path '{config_path}' not found. Using defaults.")
+                model_cfg = {}
+        elif isinstance(mt_entry, dict) and mt_entry.get("extends"):
+            base_path = mt_entry["extends"]
+            if os.path.exists(base_path):
+                with open(base_path) as f:
+                    raw_cfg = yaml.safe_load(f)
+                model_cfg = {}
+                for section in ("model", "optimizer", "scheduler", "regularization"):
+                    section_cfg = raw_cfg.get(section, {})
+                    if isinstance(section_cfg, dict):
+                        model_cfg.update(section_cfg)
+                overrides = mt_entry.get("overrides", {})
+                model_cfg.update(overrides)
+            else:
+                print(f"WARNING: base config path '{base_path}' not found for variant. Using defaults.")
+                model_cfg = {}
+        elif isinstance(mt_entry, dict):
+            model_cfg = mt_entry
+        else:
+            model_cfg = {}
+
+    # Thread training-level config into model_cfg
+    train_cfg = cfg.get("training", {})
+    model_cfg["amp"] = train_cfg.get("amp", True)
+    model_cfg["gradient_checkpointing"] = train_cfg.get("gradient_checkpointing", True)
+    model_cfg["num_workers"] = train_cfg.get("num_workers", 2)
+    model_cfg["pin_memory"] = train_cfg.get("pin_memory", True)
+    model_cfg["prefetch_factor"] = train_cfg.get("prefetch_factor", 2)
 
     seed = cfg.get("seed", {}).get("global", 42)
     t_start = time.time()
     set_seed(seed)
-    device = torch.device("cuda" if torch.cuda.is_available() and
-                          cfg.get("device", {}).get("use_cuda", True) else "cpu")
+    use_cuda = torch.cuda.is_available() and cfg.get("device", {}).get("use_cuda", True)
+    if use_cuda:
+        try:
+            torch.tensor([1.0], device="cuda").sum()
+        except Exception:
+            print("WARNING: CUDA device found but not usable. Falling back to CPU.")
+            use_cuda = False
+    device = torch.device("cuda" if use_cuda else "cpu")
+    print(f"Device: {device}")
+
+    _gpu_monitor._running = True
+    monitor_thread = threading.Thread(target=_gpu_monitor, daemon=True)
+    monitor_thread.start()
+
     target_col = cfg["data"]["target_col"]
     exp_ver = cfg.get("experiment", {}).get("version", "v1")
     ckpt_dir = Path(cfg["paths"].get("checkpoints_dir", "outputs/checkpoints/"))
@@ -325,13 +426,26 @@ def main():
 
     if args.target:
         train = pd.read_parquet(data_dir / "processed" / "features_train.parquet")
-        target_train_csv = data_dir / target / "train.csv"
-        target_df = pd.read_csv(target_train_csv)
-        if "SMILES" not in target_df.columns:
-            target_df = target_df.rename(columns={"smiles": "SMILES"})
-        # Inner merge preserves per-target row order (left) so that
-        # fold indices in splits_{target}.pkl align with train rows
-        train = target_df.merge(train, on="SMILES", how="inner")
+        full_train = pd.read_csv(data_dir / "train.csv")
+        if len(train) == len(full_train):
+            # Same row count — use positional alignment (preserves fold split indices)
+            train[target_col] = full_train[target_col].values
+            train["target_type"] = full_train["target_type"].values
+        else:
+            # Row count mismatch due to canonicalization failures — use SMILES merge
+            from rdkit import Chem
+            def _canon(s):
+                mol = Chem.MolFromSmiles(s)
+                return Chem.MolToSmiles(mol, canonical=True) if mol else None
+            canon_map = {s: _canon(s) for s in full_train["smiles"].unique()}
+            full_train["canon_smiles"] = full_train["smiles"].map(canon_map)
+            full_train = full_train.dropna(subset=["canon_smiles"])
+            train = full_train[["canon_smiles", target_col, "target_type"]].merge(
+                train.drop(columns=["canon_smiles"], errors="ignore"),
+                left_on="canon_smiles", right_on="SMILES", how="left",
+            )
+            train = train.dropna(subset=[target_col]).reset_index(drop=True)
+        train = train[train["target_type"] == target].reset_index(drop=True)
         splits_path = data_dir / f"splits_{target}.pkl"
     else:
         train = pd.read_parquet(data_dir / "processed" / "train_features.parquet")
@@ -478,7 +592,7 @@ def main():
         save_checkpoint(ckpt_payload, best_path)
         save_checkpoint(ckpt_payload, final_path)
         print(f"  Checkpoint saved -> {best_path}")
-    elif args.model_type == "polychain":
+    elif args.model_type == "polychain" or args.model_type.startswith("polychain_"):
         from features.graph_utils import build_multiscale
         from models.polychain.cst import compute_cst_batch
 
@@ -504,9 +618,13 @@ def main():
             return batch
 
         train_loader = DataLoader(train_samples, batch_size=model_cfg.get("batch_size", 32),
-                                  shuffle=True, collate_fn=collate)
+                                  shuffle=True, collate_fn=collate,
+                                  num_workers=2, pin_memory=True,
+                                  persistent_workers=True, prefetch_factor=2)
         val_loader = DataLoader(val_samples, batch_size=model_cfg.get("batch_size", 32),
-                                shuffle=False, collate_fn=collate)
+                                shuffle=False, collate_fn=collate,
+                                num_workers=2, pin_memory=True,
+                                persistent_workers=True, prefetch_factor=2)
 
         # Inspect first batch for dims
         first = next(iter(train_loader))
@@ -527,6 +645,7 @@ def main():
             "hidden_dim": model_cfg.get("hidden_dim", 256),
             "n_backbone_layers": model_cfg.get("n_backbone_layers", 4),
             "n_hamf_layers": model_cfg.get("n_hamf_layers", 2),
+            "cst_dim": model_cfg.get("cst_dim", 32),
         }
 
         model, best_val_rmse = train_graph(model, train_loader, val_loader,
@@ -545,6 +664,22 @@ def main():
                 pred = model(batch_dict)
                 preds.append(pred.cpu().numpy())
         pred_va = np.concatenate(preds)
+        # Save checkpoint for manifest recording
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+        ckpt_tag = f"{exp_ver}_{target}_{args.model_type}_fold{args.fold}"
+        best_path = ckpt_dir / f"{ckpt_tag}_best.pt"
+        final_path = ckpt_dir / f"{ckpt_tag}_final.pt"
+        ckpt_payload = {
+            "model_state": model.state_dict(),
+            "model_type": args.model_type,
+            "fold": args.fold,
+            "epoch": 0,
+            "val_rmse": best_val_rmse,
+            "config": model_ckpt_cfg,
+        }
+        save_checkpoint(ckpt_payload, best_path)
+        save_checkpoint(ckpt_payload, final_path)
+        print(f"  Checkpoint saved -> {best_path}")
     else:
         # GNN baselines (GCN/GAT/MPNN/GraphTransformer/FusionNet)
         from features.graphs import smiles_to_graph
@@ -559,8 +694,12 @@ def main():
         edge_dim = train_graphs[0].edge_attr.size(1)
 
         PyGDL = PyGDataLoader if PyGDataLoader is not None else DataLoader
-        train_loader = PyGDL(train_graphs, batch_size=64, shuffle=True)
-        val_loader = PyGDL(val_graphs, batch_size=64, shuffle=False)
+        train_loader = PyGDL(train_graphs, batch_size=64, shuffle=True,
+                             num_workers=2, pin_memory=True,
+                             persistent_workers=True, prefetch_factor=2)
+        val_loader = PyGDL(val_graphs, batch_size=64, shuffle=False,
+                           num_workers=2, pin_memory=True,
+                           persistent_workers=True, prefetch_factor=2)
 
         model, _ = build_model(args.model_type, model_cfg, in_dim=in_dim, edge_dim=edge_dim)
         model = model.to(device)
@@ -642,7 +781,7 @@ def main():
             model.eval()
             with torch.no_grad():
                 test_preds = model(torch.from_numpy(X_test).to(device)).squeeze(-1).cpu().numpy()
-        elif args.model_type == "polychain":
+        elif args.model_type == "polychain" or args.model_type.startswith("polychain_"):
             from features.graph_utils import build_multiscale
             from models.polychain.cst import compute_cst_batch
             test_samples = [build_multiscale(s) for s in test_feat["SMILES"].tolist()]
@@ -654,7 +793,9 @@ def main():
                 batch["cst"] = torch.tensor(compute_cst_batch([s.smiles for s in samples]), dtype=torch.float)
                 return batch
 
-            test_loader = DataLoader(test_samples, batch_size=64, shuffle=False, collate_fn=collate)
+            test_loader = DataLoader(test_samples, batch_size=64, shuffle=False, collate_fn=collate,
+                                      num_workers=2, pin_memory=True,
+                                      persistent_workers=True, prefetch_factor=2)
             model.eval()
             test_preds = []
             with torch.no_grad():
@@ -668,7 +809,9 @@ def main():
             test_graphs = [smiles_to_graph(s) for s in test_feat["SMILES"].tolist()]
             test_graphs = [g for g in test_graphs if g is not None]
             from torch_geometric.loader import DataLoader as PyGDL
-            test_loader = PyGDL(test_graphs, batch_size=64, shuffle=False)
+            test_loader = PyGDL(test_graphs, batch_size=64, shuffle=False,
+                                 num_workers=2, pin_memory=True,
+                                 persistent_workers=True, prefetch_factor=2)
             model.eval()
             test_preds = []
             with torch.no_grad():
@@ -689,6 +832,11 @@ def main():
             }, f)
         print(f"Test predictions saved -> {test_out}")
 
+
+    _gpu_monitor._running = False
+    monitor_thread.join(timeout=5)
+    if torch.cuda.is_available():
+        print(f"Peak GPU memory: {torch.cuda.max_memory_allocated() / 1e9:.2f} GB")
 
 if __name__ == "__main__":
     main()

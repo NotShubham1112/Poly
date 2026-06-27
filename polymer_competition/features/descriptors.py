@@ -6,6 +6,9 @@ Returns a pandas DataFrame with descriptor columns + SMILES column.
 """
 from __future__ import annotations
 
+import signal
+from contextlib import contextmanager
+
 import numpy as np
 import pandas as pd
 from rdkit import Chem
@@ -13,8 +16,35 @@ from rdkit.Chem import Descriptors
 from rdkit.ML.Descriptors import MoleculeDescriptors
 
 
-# Canonical list of descriptor names (matches RDKit 2023.09 output)
-DESCRIPTOR_NAMES: list[str] = [d[0] for d in Descriptors.descList]
+# Some EState descriptors can hang on certain molecules
+_ESTATE_HANG_NAMES = {
+    "MinAbsEStateIndex", "MaxAbsEStateIndex",
+    "MaxEStateIndex", "MinEStateIndex",
+    "EState_VSA1", "EState_VSA2", "EState_VSA3", "EState_VSA4",
+    "EState_VSA5", "EState_VSA6", "EState_VSA7", "EState_VSA8",
+    "EState_VSA9", "EState_VSA10", "EState_VSA11",
+    "VSA_EState1", "VSA_EState2", "VSA_EState3", "VSA_EState4",
+    "VSA_EState5", "VSA_EState6", "VSA_EState7", "VSA_EState8",
+    "VSA_EState9", "VSA_EState10",
+}
+
+# Canonical list of descriptor names (matches RDKit 2023.09 output) — exclude hang-prone
+DESCRIPTOR_NAMES: list[str] = [
+    d[0] for d in Descriptors.descList if d[0] not in _ESTATE_HANG_NAMES
+]
+
+
+@contextmanager
+def _timeout(seconds: int = 5):
+    """Raises TimeoutError if block takes longer than `seconds`."""
+    def handler(signum, frame):
+        raise TimeoutError("Descriptor computation timed out")
+    signal.signal(signal.SIGALRM, handler)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
 
 
 def _safe_mol(smiles: str):
@@ -51,8 +81,11 @@ def compute_descriptors(smiles_list, names: list[str] | None = None) -> pd.DataF
             rows.append([np.nan] * len(names))
         else:
             try:
-                desc = calc.CalcDescriptors(mol)
+                with _timeout(10):
+                    desc = calc.CalcDescriptors(mol)
                 rows.append(list(desc))
+            except TimeoutError:
+                rows.append([np.nan] * len(names))
             except Exception as e:
                 import logging
                 log = logging.getLogger(__name__)

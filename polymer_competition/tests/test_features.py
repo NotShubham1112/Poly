@@ -7,6 +7,7 @@ import pytest
 
 from features.fingerprints import morgan_fingerprints, maccs_fingerprints
 from features.descriptors import compute_descriptors
+from features.polymer_descriptors import compute_polymer_descriptors
 from features.custom_polymer import (
     compute_all_custom_features, rigidity_index, hbond_density,
     asterisks_count, repeat_unit_length, branching_indicator,
@@ -77,6 +78,58 @@ def test_cst_batch():
     M = compute_cst_batch(SAMPLE_SMILES)
     assert M.shape == (3, CST_DIM)
     assert not np.isnan(M).any()
+
+
+def test_polymer_descriptors_smoke():
+    result = compute_polymer_descriptors("C=CC(C)C(=O)OC")
+    assert len(result) == 32
+    assert "n_heavy_atoms" in result
+    assert "num_rings" in result
+    assert "logp" in result
+    assert "tpsa" in result
+    assert not any(np.isnan(v) for v in result.values() if v != 0.0)
+
+
+def test_polymer_descriptors_star():
+    result = compute_polymer_descriptors("*C(=O)c1ccc(NC(=O)c2ccc(*)cc2)cc1")
+    assert result["star_count"] == 2.0
+    assert result["is_branched"] == 0.0
+    assert result["num_rings"] >= 2
+    assert result["aromatic_fraction"] > 0.0
+
+
+def test_polymer_descriptors_invalid():
+    result = compute_polymer_descriptors("")
+    assert result["n_heavy_atoms"] == 0.0
+    assert result["star_count"] == 0.0
+    assert result["num_chiral_centers"] == 0.0
+
+
+def test_polymer_descriptors_all_keys():
+    result = compute_polymer_descriptors("CCO")
+    expected_keys = [
+        "n_heavy_atoms", "star_count", "is_branched",
+        "num_rings", "num_aromatic_rings", "aromatic_fraction",
+        "atom_F", "atom_Cl", "atom_Br", "atom_I", "atom_Si",
+        "atom_O", "atom_N", "atom_S", "atom_P",
+        "atom_F_frac", "atom_Cl_frac", "atom_Br_frac", "atom_I_frac",
+        "atom_Si_frac", "atom_O_frac", "atom_N_frac", "atom_S_frac", "atom_P_frac",
+        "rotatable_bonds", "rotatable_fraction", "flexibility_index",
+        "tpsa", "logp", "mw",
+        "num_chiral_centers", "has_stereo",
+    ]
+    for k in expected_keys:
+        assert k in result, f"Missing key: {k}"
+    assert len(result) == len(expected_keys)
+
+
+def test_graph_feature_dims():
+    from features.graphs import smiles_to_graph
+    g = smiles_to_graph("C=CC(C)C(=O)OC")
+    assert g is not None
+    assert g.x.shape[1] == 51, f"Expected 51 atom features, got {g.x.shape[1]}"
+    assert g.edge_attr.shape[1] == 14, f"Expected 14 bond features, got {g.edge_attr.shape[1]}"
+    print(f"Atom feats: {g.x.shape[1]}, Bond feats: {g.edge_attr.shape[1]} - OK")
 
 
 def test_feature_cache_metadata():

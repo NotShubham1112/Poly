@@ -10,8 +10,15 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GINConv, global_add_pool
-from torch_geometric.utils import scatter
+import torch.utils.checkpoint as checkpoint
+try:
+    from torch_geometric.nn import GINConv, global_add_pool
+    from torch_geometric.utils import scatter
+except ImportError:
+    raise ImportError(
+        "PyTorch Geometric (torch_geometric) is required for PolyChain. "
+        "Install it with: conda install pyg -c pyg  or  pip install torch_geometric"
+    )
 
 
 # ----------------------------------------------------------------------------
@@ -56,8 +63,9 @@ class GINBackbone(nn.Module):
     """
 
     def __init__(self, in_dim: int, edge_dim: int, hidden_dim: int = 128,
-                 n_layers: int = 4, dropout: float = 0.2):
+                 n_layers: int = 4, dropout: float = 0.2, grad_checkpoint: bool = False):
         super().__init__()
+        self.grad_checkpoint = grad_checkpoint
         self.atom_encoder = nn.Linear(in_dim, hidden_dim)
         self.convs = nn.ModuleList()
         for _ in range(n_layers):
@@ -91,7 +99,12 @@ class GINBackbone(nn.Module):
         for i, (conv, norm, v_mlp) in enumerate(zip(self.convs, self.norms, self.virtual_mlp)):
             # Distribute virtual state to atoms
             x = x + virtual_state[batch]
-            x = conv(x, edge_index, edge_attr)
+            if self.training and self.grad_checkpoint:
+                x = checkpoint.checkpoint(
+                    lambda *args: conv(*args), x, edge_index, edge_attr, use_reentrant=False
+                )
+            else:
+                x = conv(x, edge_index, edge_attr)
             x = norm(x)
             x = F.dropout(F.relu(x), p=self.dropout, training=self.training)
 
