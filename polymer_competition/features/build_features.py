@@ -179,26 +179,23 @@ def build_features(config_path: str = "config.yaml") -> None:
     split_by_target(data_dir / "train.csv", data_dir / "test.csv", data_dir,
               targets=list(cfg["targets"].keys()))
 
-    # Check for scaffold-aware splits from training/splits.py
-    scaffold_splits_exist = all(
-        (data_dir / f"splits_{t_name}_scaffold.pkl").exists()
-        for t_name in cfg["targets"]
-    )
-    if scaffold_splits_exist:
-        print("Using scaffold-aware splits from training/splits.py")
-    else:
-        for t_name, t_cfg in cfg["targets"].items():
-            t_dir = data_dir / t_name
-            t_train = pd.read_csv(t_dir / "train.csv")
-            t_train = t_train.rename(columns={smiles_col: "SMILES"})
-            scaffolds = t_train["SMILES"].apply(_smiles_scaffold).values
-            gkf = GroupKFold(n_splits=cfg["cv"]["n_folds"])
-            splits = {}
-            for fold, (tr_idx, va_idx) in enumerate(gkf.split(t_train, groups=scaffolds)):
-                splits[fold] = {"train": tr_idx.tolist(), "val": va_idx.tolist()}
-            with open(data_dir / f"splits_{t_name}.pkl", "wb") as f:
-                pickle.dump(splits, f)
-            print(f"splits_{t_name}.pkl: {len(splits)} folds")
+    for t_name, t_cfg in cfg["targets"].items():
+        scaffold_path = data_dir / f"splits_{t_name}_scaffold.pkl"
+        if scaffold_path.exists():
+            print(f"Using scaffold-aware splits for {t_name} from training/splits.py")
+            continue
+
+        t_dir = data_dir / t_name
+        t_train = pd.read_csv(t_dir / "train.csv")
+        t_train = t_train.rename(columns={smiles_col: "SMILES"})
+        scaffolds = t_train["SMILES"].apply(_smiles_scaffold).values
+        gkf = GroupKFold(n_splits=cfg["cv"]["n_folds"])
+        splits = {}
+        for fold, (tr_idx, va_idx) in enumerate(gkf.split(t_train, groups=scaffolds)):
+            splits[fold] = {"train": tr_idx.tolist(), "val": va_idx.tolist()}
+        with open(data_dir / f"splits_{t_name}.pkl", "wb") as f:
+            pickle.dump(splits, f)
+        print(f"splits_{t_name}.pkl: {len(splits)} folds")
 
 
 if __name__ == "__main__":

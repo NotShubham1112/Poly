@@ -32,7 +32,7 @@ def murcko_scaffold(smiles: str) -> str:
 def generate_scaffold_splits(
     df: pd.DataFrame,
     n_folds: int = 5,
-    smiles_col: str = "smiles",
+    smiles_col: str = "SMILES",
     target_col: str = "target",
     seed: int = 42,
 ) -> dict[int, dict[str, np.ndarray]]:
@@ -81,8 +81,8 @@ def main():
 
     data_dir = Path(cfg.get("paths", {}).get("data_dir", "data/"))
     n_folds = args.n_folds or cfg.get("cv", {}).get("n_folds", 5)
-    seed = args.seed or cfg.get("seed", {}).get("global", 42)
-    smiles_col = cfg.get("data", {}).get("smiles_col", "smiles")
+    seed = args.seed if args.seed is not None else cfg.get("seed", {}).get("global", 42)
+    smiles_col = cfg.get("data", {}).get("smiles_col", "SMILES")
     target_col = cfg.get("data", {}).get("target_col", "target")
     target_type_col = cfg.get("data", {}).get("target_type", "target_type")
     output_dir = Path(args.output_dir) if args.output_dir else data_dir
