@@ -189,10 +189,20 @@ def main():
         return
 
     test_pivot = test_df.groupby(["id", "model_type"])["pred"].mean().unstack()
-    test_pivot = test_pivot[[m for m in model_names if m in test_pivot.columns]]
-    if len(test_pivot.columns) == 0:
+    available_models = [m for m in model_names if m in test_pivot.columns]
+    if len(available_models) == 0:
         print(f"No test predictions for models {model_names}. Skipping submission.")
         return
+    if len(available_models) < len(model_names):
+        missing = set(model_names) - set(available_models)
+        print(f"Warning: missing test predictions for {missing}. Retraining OOF with {available_models}")
+        # Retrain meta-model with only the models available in test
+        avail_idx = [i for i, m in enumerate(model_names) if m in available_models]
+        oof = oof[:, avail_idx]
+        model_names = available_models
+        meta_model, meta_name, meta_score = select_best_meta(oof, y, model_names)
+        stage2_model, final_score = try_stage2_stacking(oof, y, meta_model, meta_score, model_names)
+    test_pivot = test_pivot[available_models]
 
     if test_pivot.isna().any().any():
         print("Warning: NaN values in test predictions; filling with column mean.")

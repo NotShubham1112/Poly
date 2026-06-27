@@ -97,7 +97,7 @@ def build_features(config_path: str = "config.yaml") -> None:
     desc = select_descriptors_by_variance(desc)
     cust = compute_all_custom_features(unique_smiles)
     poly_desc = [compute_polymer_descriptors(s) for s in unique_smiles]
-    poly_df = pd.DataFrame(poly_desc)
+    poly_df = pd.DataFrame(poly_desc).add_prefix("polymer_")
 
     fp_dfs = {}
     for name, arr in fps.items():
@@ -122,7 +122,15 @@ def build_features(config_path: str = "config.yaml") -> None:
     del fp_dfs, desc_df, cust_df, poly_df
     gc.collect()
 
-    num_cols = [c for c in cache_df.columns if c != "canon_smiles" and cache_df[c].dtype != object]
+    num_cols = []
+    for c in cache_df.columns:
+        if c == "canon_smiles":
+            continue
+        col = cache_df[c]
+        if isinstance(col, pd.DataFrame):
+            col = col.iloc[:, 0]
+        if col.dtype != object:
+            num_cols.append(c)
     # Replace inf with NaN before imputation (inf can't be cast to float32)
     for col in num_cols:
         col_vals = cache_df[col].values
