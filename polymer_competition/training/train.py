@@ -85,7 +85,7 @@ def build_model(model_type: str, cfg: dict, in_dim: int = None, edge_dim: int = 
         return PolymerFusionNet(n_modalities=cfg.get("n_modalities", 5),
                                 dim=cfg.get("dim", 256),
                                 n_layers=cfg.get("n_layers", 2)), True
-    if model_type == "polychain":
+    if model_type == "polychain" or model_type.startswith("polychain_"):
         from models.polychain import PolyChain
         return PolyChain(in_atom_dim=in_dim, in_edge_dim=edge_dim,
                          hidden_dim=cfg.get("hidden_dim", 256),
@@ -327,6 +327,21 @@ def main():
             else:
                 print(f"WARNING: model config path '{config_path}' not found. Using defaults.")
                 model_cfg = {}
+        elif isinstance(mt_entry, dict) and mt_entry.get("extends"):
+            base_path = mt_entry["extends"]
+            if os.path.exists(base_path):
+                with open(base_path) as f:
+                    raw_cfg = yaml.safe_load(f)
+                model_cfg = {}
+                for section in ("model", "optimizer", "scheduler", "regularization"):
+                    section_cfg = raw_cfg.get(section, {})
+                    if isinstance(section_cfg, dict):
+                        model_cfg.update(section_cfg)
+                overrides = mt_entry.get("overrides", {})
+                model_cfg.update(overrides)
+            else:
+                print(f"WARNING: base config path '{base_path}' not found for variant. Using defaults.")
+                model_cfg = {}
         elif isinstance(mt_entry, dict):
             model_cfg = mt_entry
         else:
@@ -520,7 +535,7 @@ def main():
         save_checkpoint(ckpt_payload, best_path)
         save_checkpoint(ckpt_payload, final_path)
         print(f"  Checkpoint saved -> {best_path}")
-    elif args.model_type == "polychain":
+    elif args.model_type == "polychain" or args.model_type.startswith("polychain_"):
         from features.graph_utils import build_multiscale
         from models.polychain.cst import compute_cst_batch
 
@@ -701,7 +716,7 @@ def main():
             model.eval()
             with torch.no_grad():
                 test_preds = model(torch.from_numpy(X_test).to(device)).squeeze(-1).cpu().numpy()
-        elif args.model_type == "polychain":
+        elif args.model_type == "polychain" or args.model_type.startswith("polychain_"):
             from features.graph_utils import build_multiscale
             from models.polychain.cst import compute_cst_batch
             test_samples = [build_multiscale(s) for s in test_feat["SMILES"].tolist()]

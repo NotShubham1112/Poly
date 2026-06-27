@@ -64,6 +64,22 @@ ensemble:
 model_types:
   polychain:
     config: "models/polychain/configs/base.yaml"
+  polychain_deep:
+    extends: "models/polychain/configs/base.yaml"
+    overrides:
+      n_backbone_layers: 6
+      n_hamf_layers: 3
+      hidden_dim: 384
+  polychain_wide:
+    extends: "models/polychain/configs/base.yaml"
+    overrides:
+      hidden_dim: 512
+  polychain_light:
+    extends: "models/polychain/configs/base.yaml"
+    overrides:
+      n_backbone_layers: 3
+      n_hamf_layers: 1
+      hidden_dim: 128
 
 logging:
   level: "INFO"
