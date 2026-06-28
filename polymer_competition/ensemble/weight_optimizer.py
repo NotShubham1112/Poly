@@ -124,30 +124,17 @@ def objective(weights, preds_matrix, y_true):
 def optimize_weights(oof_dict, n_folds=5):
     """Optimize blending weights by SLSQP over stacked OOF predictions.
 
-    Returns ``(weights_dict, val_r2)`` or ``(None, None)`` when the OOF data is
+    Uses :func:`_stack_oof` to build a strictly consistent stacked matrix;
+    models that disagree on per-fold lengths are dropped. Returns
+    ``(weights_dict, val_r2)`` or ``(None, None)`` when the OOF data is
     insufficient.
     """
     models = list(oof_dict.keys())
-    n_models = len(models)
-    if n_models == 0:
+    if not models:
         return None, None
-    all_preds = []
-    all_y = []
-    for fold in range(n_folds):
-        fold_preds = []
-        for model in models:
-            if fold not in oof_dict[model]["preds"]:
-                break
-            fold_preds.append(oof_dict[model]["preds"][fold])
-        if len(fold_preds) != n_models:
-            continue
-        fold_preds = np.column_stack(fold_preds)
-        all_preds.append(fold_preds)
-        all_y.append(oof_dict[models[0]]["targets"][fold])
-    if not all_preds:
+    all_preds, all_y, active = _stack_oof(oof_dict, models, n_folds)
+    if all_preds is None:
         return None, None
-    all_preds = np.vstack(all_preds)
-    all_y = np.concatenate(all_y)
     n = all_preds.shape[1]
     x0 = np.ones(n) / n
     bounds = [(0, 1)] * n
@@ -157,7 +144,7 @@ def optimize_weights(oof_dict, n_folds=5):
                       options={"maxiter": 1000, "ftol": 1e-8})
     best_r2 = -result.fun
     weights = result.x
-    return dict(zip(models, [float(w) for w in weights])), float(f"{best_r2:.4f}")
+    return dict(zip(active, [float(w) for w in weights])), float(f"{best_r2:.4f}")
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +225,59 @@ def save_weights(target, weights, score, out_dir="ensembles", strategy: str = No
     print(f"  Saved weights -> {out_path}")
 
 
+def _stack_oof(oof_dict, models, n_folds):
+    """Stack OOF preds and targets across folds, requiring consistent per-fold
+    lengths across the given ``models``.
+
+    Uses a two-pass approach:
+      1. Identify every (model, fold) pair where the prediction length
+         disagrees with the reference for that fold; drop those models.
+      2. Stack the remaining models' predictions across folds that all
+         surviving models have data for.
+
+    Returns ``(all_preds, all_y, active_models)`` or ``(None, None, [])``
+    when no fold can be stacked.
+    """
+    models = list(models)
+    if not models:
+        return None, None, []
+
+    # Pass 1: identify consistent models per fold
+    surviving = set(models)
+    consistent_folds = []
+    for fold in range(n_folds):
+        ref_len = None
+        fold_ok = True
+        for m in models:
+            if fold not in oof_dict[m]["preds"]:
+                fold_ok = False
+                break
+            p = np.asarray(oof_dict[m]["preds"][fold])
+            if ref_len is None:
+                ref_len = len(p)
+            elif len(p) != ref_len:
+                surviving.discard(m)
+                fold_ok = False
+                break
+        if fold_ok:
+            consistent_folds.append(fold)
+
+    if not surviving or not consistent_folds:
+        return None, None, []
+
+    # Pass 2: stack surviving models on consistent folds only
+    all_preds = []
+    all_y = []
+    for fold in consistent_folds:
+        first = next(iter(surviving))
+        ref_y = np.asarray(oof_dict[first]["targets"][fold])
+        cols = [np.asarray(oof_dict[m]["preds"][fold]) for m in models if m in surviving]
+        all_preds.append(np.column_stack(cols))
+        all_y.append(ref_y)
+    active = [m for m in models if m in surviving]
+    return np.vstack(all_preds), np.concatenate(all_y), active
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--target", default=None)
@@ -257,46 +297,20 @@ def main():
             print(f"  No OOF predictions found for {target}")
             continue
         print(f"  Models found: {list(oof.keys())}")
-        if args.strategy == "uncertainty":
-            weights, score = optimize_weights(oof, args.n_folds)
-            if weights is None:
-                print(f"  Could not optimize (insufficient data)")
-                continue
-            models = list(weights.keys())
-            all_preds, all_y = [], []
-            for fold in range(args.n_folds):
-                if not all(fold in oof[m]["preds"] for m in models):
-                    continue
-                cols = [oof[m]["preds"][fold] for m in models]
-                all_preds.append(np.column_stack(cols))
-                all_y.append(oof[models[0]]["targets"][fold])
-            if not all_preds:
-                print(f"  Could not optimize (insufficient data)")
-                continue
-            all_preds = np.vstack(all_preds)
-            all_y = np.concatenate(all_y)
-            w = get_weights("uncertainty", all_preds, all_y)
-            weights = dict(zip(models, [float(v) for v in w]))
-            score = float(f"{r2_score(all_y, all_preds @ w):.4f}")
+        models = list(oof.keys())
+        all_preds, all_y, active = _stack_oof(oof, models, args.n_folds)
+        if all_preds is None:
+            print(f"  Could not optimize (insufficient data)")
+            continue
+        if len(active) < len(models):
+            print(f"  Dropping inconsistent models: "
+                  f"{set(models) - set(active)}")
+        if args.strategy == "uniform":
+            w = get_weights("uniform", all_preds, all_y)
         else:
-            weights, score = optimize_weights(oof, args.n_folds)
-            if weights is None:
-                print(f"  Could not optimize (insufficient data)")
-                continue
-            models = list(weights.keys())
-            all_preds, all_y = [], []
-            for fold in range(args.n_folds):
-                if not all(fold in oof[m]["preds"] for m in models):
-                    continue
-                cols = [oof[m]["preds"][fold] for m in models]
-                all_preds.append(np.column_stack(cols))
-                all_y.append(oof[models[0]]["targets"][fold])
-            if all_preds:
-                all_preds = np.vstack(all_preds)
-                all_y = np.concatenate(all_y)
-                w = get_weights(args.strategy, all_preds, all_y)
-                weights = dict(zip(models, [float(v) for v in w]))
-                score = float(f"{r2_score(all_y, all_preds @ w):.4f}")
+            w = get_weights(args.strategy, all_preds, all_y)
+        weights = dict(zip(active, [float(v) for v in w]))
+        score = float(f"{r2_score(all_y, all_preds @ w):.4f}")
         print(f"  Best R²: {score}")
         for model, w in sorted(weights.items(), key=lambda x: -x[1]):
             print(f"    {model}: {w:.3f}")

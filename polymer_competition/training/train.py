@@ -226,22 +226,39 @@ def train_multitask_per_fold(cfg: dict, fold: int, exp_ver: str,
         raise ValueError(f"fold {fold} not present in tg/egc splits")
 
     target_col = cfg["data"]["target_col"]
+    # Re-load with target_type annotation so we can split by target cleanly.
+    # Matches the join logic in main() when --target is passed.
     train_feat = pd.read_parquet(data_dir / "processed" / "features_train.parquet")
+    full_train = pd.read_csv(data_dir / "train.csv")
+    if len(train_feat) == len(full_train):
+        train_feat[target_col] = full_train[target_col].values
+        train_feat["target_type"] = full_train["target_type"].values
+    else:
+        from rdkit import Chem
+        def _canon(s):
+            mol = Chem.MolFromSmiles(s)
+            return Chem.MolToSmiles(mol, canonical=True) if mol else None
+        canon_map = {s: _canon(s) for s in full_train["smiles"].unique()}
+        full_train["canon_smiles"] = full_train["smiles"].map(canon_map)
+        full_train = full_train.dropna(subset=["canon_smiles"])
+        train_feat = full_train[["canon_smiles", target_col, "target_type"]].merge(
+            train_feat.drop(columns=["canon_smiles"], errors="ignore"),
+            left_on="canon_smiles", right_on="SMILES", how="left",
+        )
+        train_feat = train_feat.dropna(subset=[target_col]).reset_index(drop=True)
 
-    # Tg fold
+    # Tg fold: train on Tg-only rows; predict on the *full* val set so the
+    # OOF pickle lines up with the other v27/v28 model OOFs (same val_idx).
     tg_train_idx, tg_val_idx = splits_tg[fold]["train"], splits_tg[fold]["val"]
     tg_train_df = train_feat.iloc[tg_train_idx].reset_index(drop=True)
     tg_val_df = train_feat.iloc[tg_val_idx].reset_index(drop=True)
-    # Filter to Tg rows only (target_type == "tg"); val set may contain both types
     tg_train_df = tg_train_df[tg_train_df["target_type"] == "tg"].reset_index(drop=True)
-    tg_val_df = tg_val_df[tg_val_df["target_type"] == "tg"].reset_index(drop=True)
 
-    # Egc fold
+    # Egc fold: same pattern.
     egc_train_idx, egc_val_idx = splits_egc[fold]["train"], splits_egc[fold]["val"]
     egc_train_df = train_feat.iloc[egc_train_idx].reset_index(drop=True)
     egc_val_df = train_feat.iloc[egc_val_idx].reset_index(drop=True)
     egc_train_df = egc_train_df[egc_train_df["target_type"] == "egc"].reset_index(drop=True)
-    egc_val_df = egc_val_df[egc_val_df["target_type"] == "egc"].reset_index(drop=True)
 
     feature_cols = [c for c in train_feat.columns
                     if c not in ("SMILES", "id", "canon_smiles", "target_type", target_col)]
@@ -255,9 +272,8 @@ def train_multitask_per_fold(cfg: dict, fold: int, exp_ver: str,
         X_tg_tr, y_tg_tr, X_egc_tr, y_egc_tr, cfg, device=device, return_oof=True,
     )
 
-    # Inference on Tg val set (predict Tg head only)
+    # Inference on the FULL tg val set (matches other v27/v28 model OOFs).
     model.eval()
-    from sklearn.preprocessing import StandardScaler
     X_val_tg = tg_val_df[common_features].values.astype(np.float32)
     if X_val_tg.size > 0:
         X_val_tg_scaled = model._scaler_X.transform(X_val_tg).astype(np.float32)
@@ -270,6 +286,7 @@ def train_multitask_per_fold(cfg: dict, fold: int, exp_ver: str,
         tg_val_pred = np.zeros(0)
         y_val_tg = np.zeros(0)
 
+    # Inference on the FULL egc val set.
     X_val_egc = egc_val_df[common_features].values.astype(np.float32)
     if X_val_egc.size > 0:
         X_val_egc_scaled = model._scaler_X.transform(X_val_egc).astype(np.float32)
@@ -286,14 +303,14 @@ def train_multitask_per_fold(cfg: dict, fold: int, exp_ver: str,
     if len(tg_val_pred) > 0:
         out_tg = pred_dir / f"{exp_ver}_tg_multitask_fold{fold}.pkl"
         with open(out_tg, "wb") as f:
-            pickle.dump({"val_idx": tg_val_idx[:len(tg_val_pred)].tolist(),
+            pickle.dump({"val_idx": list(tg_val_idx[:len(tg_val_pred)]),
                          "pred": tg_val_pred, "y": y_val_tg,
                          "model_type": "multitask", "fold": fold, "target": "tg"}, f)
         print(f"Saved tg multitask OOF -> {out_tg}")
     if len(egc_val_pred) > 0:
         out_egc = pred_dir / f"{exp_ver}_egc_multitask_fold{fold}.pkl"
         with open(out_egc, "wb") as f:
-            pickle.dump({"val_idx": egc_val_idx[:len(egc_val_pred)].tolist(),
+            pickle.dump({"val_idx": list(egc_val_idx[:len(egc_val_pred)]),
                          "pred": egc_val_pred, "y": y_val_egc,
                          "model_type": "multitask", "fold": fold, "target": "egc"}, f)
         print(f"Saved egc multitask OOF -> {out_egc}")

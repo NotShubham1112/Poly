@@ -179,3 +179,29 @@ def test_stacking_meta_learner_returns_weights_or_falls_back():
     assert weights.shape == (n_models,)
     assert weights.sum() == pytest.approx(1.0, abs=1e-5)
     assert all(weights >= 0)
+
+
+def test_stack_oof_drops_mismatched_folds():
+    """_stack_oof should drop a model whose fold prediction length differs
+    from the reference, but keep all models that agree across every fold."""
+    oof = {
+        "good": {
+            "preds": {0: np.zeros(10), 1: np.zeros(10)},
+            "targets": {0: np.zeros(10), 1: np.zeros(10)},
+        },
+        "ok": {
+            "preds": {0: np.zeros(10), 1: np.zeros(10)},
+            "targets": {0: np.zeros(10), 1: np.zeros(10)},
+        },
+        "bad": {
+            # Mismatched length on fold 1
+            "preds": {0: np.zeros(10), 1: np.zeros(7)},
+            "targets": {0: np.zeros(10), 1: np.zeros(7)},
+        },
+    }
+    all_preds, all_y, active = wo._stack_oof(oof, list(oof.keys()), n_folds=2)
+    assert "bad" not in active
+    assert {"good", "ok"} <= set(active)
+    assert all_preds.shape[0] == 10  # one fold contributed
+    assert all_preds.shape[1] == 2  # two active models
+    assert all_y.shape[0] == 10
