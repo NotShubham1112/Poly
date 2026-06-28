@@ -20,6 +20,7 @@ from .descriptors import compute_descriptors, select_descriptors_by_variance
 from .custom_polymer import compute_all_custom_features
 from .polymer_descriptors import compute_polymer_descriptors
 from .advanced_descriptors import compute_all_advanced_features
+from .preprocessing import FeaturePreprocessor
 from data.split_by_target import split_by_target
 
 
@@ -203,6 +204,11 @@ def build_features(config_path: str = "config.yaml") -> None:
             cache_df[col] = np.where(np.isinf(col_vals), np.nan, col_vals)
     imputer = SimpleImputer(strategy="median")
     cache_df[num_cols] = imputer.fit_transform(cache_df[num_cols]).astype(np.float32)
+
+    # Apply FeaturePreprocessor for additional cleaning and feature selection
+    preprocessor = FeaturePreprocessor()
+    preprocessor.fit(cache_df[num_cols])
+    cache_df[num_cols] = preprocessor.transform(cache_df[num_cols], scale=False)
 
     canon_to_idx = {s: i for i, s in enumerate(cache_df["canon_smiles"].values)}
 

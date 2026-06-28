@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
+from sklearn.feature_selection import mutual_info_regression
 
 
 class FeaturePreprocessor:
@@ -22,7 +23,7 @@ class FeaturePreprocessor:
         self.keep_cols: list[str] = []
         self.fitted = False
 
-    def fit(self, X: pd.DataFrame) -> "FeaturePreprocessor":
+    def fit(self, X: pd.DataFrame, y: np.ndarray = None) -> "FeaturePreprocessor":
         """Fit preprocessor on training data."""
         X_clean = self._clean(X.copy())
 
@@ -49,11 +50,20 @@ class FeaturePreprocessor:
         else:
             self.high_corr_mask = []
 
-        # Fit scaler on remaining features
         self.keep_cols = [
             c for c in X_imputed.columns
             if c not in self.cols_to_drop and c not in self.high_corr_mask
         ]
+
+        # MI-based feature selection: keep top 500 if too many features
+        if y is not None and len(self.keep_cols) > 500:
+            mi_scores = mutual_info_regression(
+                X_imputed[self.keep_cols].fillna(0), y, random_state=42
+            )
+            top_idx = np.argsort(mi_scores)[-500:]
+            self.keep_cols = [self.keep_cols[i] for i in top_idx]
+
+        # Fit scaler on remaining features
         if self.keep_cols:
             self.scaler.fit(X_imputed[self.keep_cols])
 
@@ -79,7 +89,7 @@ class FeaturePreprocessor:
 
     def _clean(self, X: pd.DataFrame) -> pd.DataFrame:
         """Replace inf with nan."""
-        return X.replace([np.inf, -np.inf], np.nan).fillna(0)
+        return X.replace([np.inf, -np.inf], np.nan)
 
     def get_feature_names(self) -> list[str]:
         """Return list of features after preprocessing."""
