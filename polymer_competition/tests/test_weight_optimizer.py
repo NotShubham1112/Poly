@@ -202,6 +202,8 @@ def test_stack_oof_drops_mismatched_folds():
     all_preds, all_y, active = wo._stack_oof(oof, list(oof.keys()), n_folds=2)
     assert "bad" not in active
     assert {"good", "ok"} <= set(active)
-    assert all_preds.shape[0] == 10  # one fold contributed
+    # Both folds stack because good + ok agree on both folds; "bad" was
+    # dropped entirely rather than discarding the whole fold.
+    assert all_preds.shape[0] == 20  # both folds contribute
     assert all_preds.shape[1] == 2  # two active models
-    assert all_y.shape[0] == 10
+    assert all_y.shape[0] == 20

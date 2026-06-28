@@ -227,13 +227,14 @@ def save_weights(target, weights, score, out_dir="ensembles", strategy: str = No
 
 def _stack_oof(oof_dict, models, n_folds):
     """Stack OOF preds and targets across folds, requiring consistent per-fold
-    lengths across the given ``models``.
+    lengths across the surviving models.
 
     Uses a two-pass approach:
-      1. Identify every (model, fold) pair where the prediction length
-         disagrees with the reference for that fold; drop those models.
-      2. Stack the remaining models' predictions across folds that all
-         surviving models have data for.
+      1. For each fold, identify the modal prediction length; discard models
+         whose length disagrees with the mode. Models with no entry for that
+         fold are kept but ignored for that fold.
+      2. Stack the surviving models' predictions across folds that have at
+         least one surviving model with data.
 
     Returns ``(all_preds, all_y, active_models)`` or ``(None, None, [])``
     when no fold can be stacked.
@@ -242,36 +243,71 @@ def _stack_oof(oof_dict, models, n_folds):
     if not models:
         return None, None, []
 
-    # Pass 1: identify consistent models per fold
+    # Pass 1: for each fold, find the modal length and drop models that disagree.
     surviving = set(models)
-    consistent_folds = []
     for fold in range(n_folds):
-        ref_len = None
-        fold_ok = True
+        # Find the modal length across all models that have this fold.
+        lengths = []
         for m in models:
+            if m in surviving and fold in oof_dict[m]["preds"]:
+                lengths.append(len(np.asarray(oof_dict[m]["preds"][fold])))
+        if not lengths:
+            continue
+        # Modal length = most common value; ties broken by first occurrence.
+        from collections import Counter
+        mode_len, _ = Counter(lengths).most_common(1)[0]
+        # Discard models that disagree with the modal length for this fold.
+        for m in list(surviving):
             if fold not in oof_dict[m]["preds"]:
-                fold_ok = False
-                break
-            p = np.asarray(oof_dict[m]["preds"][fold])
-            if ref_len is None:
-                ref_len = len(p)
-            elif len(p) != ref_len:
+                continue
+            if len(np.asarray(oof_dict[m]["preds"][fold])) != mode_len:
                 surviving.discard(m)
-                fold_ok = False
-                break
-        if fold_ok:
-            consistent_folds.append(fold)
 
-    if not surviving or not consistent_folds:
+    if not surviving:
         return None, None, []
 
-    # Pass 2: stack surviving models on consistent folds only
+    # Restrict to models with data for *every* fold so the stacked matrix
+    # has uniform column count across folds.
+    n_folds_actual = n_folds
+    surviving = {m for m in surviving
+                 if all(f in oof_dict[m]["preds"] and f in oof_dict[m]["targets"]
+                        for f in range(n_folds_actual))}
+
+    if not surviving:
+        return None, None, []
+
+    # Pass 2: identify folds where every surviving model has data of equal length.
+    consistent_folds = []
+    for fold in range(n_folds):
+        first = next((m for m in models if m in surviving
+                      and fold in oof_dict[m]["preds"]), None)
+        if first is None:
+            continue
+        ref_len = len(np.asarray(oof_dict[first]["preds"][fold]))
+        # All surviving models with data for this fold must agree.
+        all_agree = all(
+            fold not in oof_dict[m]["preds"]
+            or len(np.asarray(oof_dict[m]["preds"][fold])) == ref_len
+            for m in models if m in surviving
+        )
+        if all_agree:
+            consistent_folds.append(fold)
+
+    if not consistent_folds:
+        return None, None, []
+
+    # Pass 3: stack surviving models on consistent folds only
     all_preds = []
     all_y = []
     for fold in consistent_folds:
-        first = next(iter(surviving))
+        # Pick a surviving model that actually has data for this fold,
+        # so we can use its targets and predictions as the column references.
+        first = next(m for m in models if m in surviving
+                     and fold in oof_dict[m]["preds"]
+                     and fold in oof_dict[m]["targets"])
         ref_y = np.asarray(oof_dict[first]["targets"][fold])
-        cols = [np.asarray(oof_dict[m]["preds"][fold]) for m in models if m in surviving]
+        cols = [np.asarray(oof_dict[m]["preds"][fold]) for m in models
+                if m in surviving and fold in oof_dict[m]["preds"]]
         all_preds.append(np.column_stack(cols))
         all_y.append(ref_y)
     active = [m for m in models if m in surviving]

@@ -182,13 +182,18 @@ def main() -> None:
     parser.add_argument("--target", choices=["tg", "egc", "all"], default="all")
     parser.add_argument("--strategy", default="optimize",
                         choices=["uniform", "optimize", "uncertainty"])
-    parser.add_argument("--exp_ver", default=None)
+    parser.add_argument("--exp_ver", default=None,
+                        help="Override experiment version for both targets.")
+    parser.add_argument("--tg_exp_ver", default=None,
+                        help="Override experiment version for tg only.")
+    parser.add_argument("--egc_exp_ver", default=None,
+                        help="Override experiment version for egc only.")
     parser.add_argument("--out_dir", default=None,
                         help="Override submissions dir (default from config.yaml).")
     args = parser.parse_args()
 
     cfg = _load_config()
-    exp_ver = args.exp_ver or cfg.get("experiment", {}).get("version", "v1")
+    default_ver = args.exp_ver or cfg.get("experiment", {}).get("version", "v1")
     pred_dir = REPO_ROOT / cfg["paths"]["predictions_dir"]
     out_dir = (REPO_ROOT / args.out_dir) if args.out_dir else (
         REPO_ROOT / cfg["paths"]["submissions_dir"]
@@ -198,9 +203,17 @@ def main() -> None:
     targets = ["tg", "egc"] if args.target == "all" else [args.target]
     parts: list[pd.DataFrame] = []
     for t in targets:
-        print(f"\n=== Blending {t} (strategy={args.strategy}) ===")
+        # Allow per-target exp_ver override (e.g. v28 tg, v27 egc while
+        # v28 egc training is still in progress).
+        if t == "tg" and args.tg_exp_ver:
+            ver = args.tg_exp_ver
+        elif t == "egc" and args.egc_exp_ver:
+            ver = args.egc_exp_ver
+        else:
+            ver = default_ver
+        print(f"\n=== Blending {t} (strategy={args.strategy}, exp_ver={ver}) ===")
         df, info = blend_target(
-            target=t, exp_ver=exp_ver, pred_dir=pred_dir, strategy=args.strategy,
+            target=t, exp_ver=ver, pred_dir=pred_dir, strategy=args.strategy,
         )
         out_csv = out_dir / f"{t}_blend.csv"
         df.to_csv(out_csv, index=False)
