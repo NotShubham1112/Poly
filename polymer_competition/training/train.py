@@ -36,6 +36,77 @@ from .train_utils import (
 from sklearn.preprocessing import StandardScaler
 
 
+# ----------------------------------------------------------------------------
+# Optuna hyperparameter tuning (used by run_tree_models.py)
+# ----------------------------------------------------------------------------
+def tune_model_optuna(model_type: str, X: np.ndarray, y: np.ndarray,
+                      n_trials: int = 30, seed: int = 42) -> dict:
+    """Find best hyperparameters via Optuna TPE sampler."""
+    import optuna
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+    def objective(trial):
+        if model_type == "xgb":
+            params = {
+                "n_estimators": trial.suggest_int("n_estimators", 200, 1000),
+                "max_depth": trial.suggest_int("max_depth", 3, 10),
+                "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
+                "subsample": trial.suggest_float("subsample", 0.6, 1.0),
+                "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
+                "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
+                "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
+                "random_state": seed,
+            }
+            from xgboost import XGBRegressor
+            model = XGBRegressor(**params)
+        elif model_type == "lgb":
+            params = {
+                "n_estimators": trial.suggest_int("n_estimators", 200, 1000),
+                "max_depth": trial.suggest_int("max_depth", 3, 10),
+                "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
+                "subsample": trial.suggest_float("subsample", 0.6, 1.0),
+                "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
+                "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
+                "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
+                "random_state": seed,
+                "verbose": -1,
+            }
+            from lightgbm import LGBMRegressor
+            model = LGBMRegressor(**params)
+        elif model_type == "catboost":
+            params = {
+                "iterations": trial.suggest_int("iterations", 200, 1000),
+                "depth": trial.suggest_int("depth", 4, 10),
+                "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
+                "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1e-8, 10.0, log=True),
+                "random_seed": seed,
+                "verbose": 0,
+            }
+            from catboost import CatBoostRegressor
+            model = CatBoostRegressor(**params)
+        else:
+            raise ValueError(f"Unsupported model_type for tuning: {model_type}")
+
+        from sklearn.model_selection import cross_val_score
+        scores = cross_val_score(model, X, y, cv=5, scoring="r2", n_jobs=-1)
+        return scores.mean()
+
+    study = optuna.create_study(direction="maximize",
+                                sampler=optuna.samplers.TPESampler(seed=seed))
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+    return study.best_params
+
+
+def _collate_polychain(samples):
+    """Module-level collate for polychain (needed for Windows multiprocessing)."""
+    from features.graph_utils import collate_multiscale
+    from models.polychain.cst import compute_cst_batch
+    batch = collate_multiscale(samples)
+    batch["cst"] = torch.tensor(compute_cst_batch([s.smiles for s in samples]),
+                                dtype=torch.float)
+    return batch
+
+
 def _gpu_monitor(interval: float = 30.0, log_path: str = "outputs/logs/gpu_util.csv"):
     import csv
     Path(log_path).parent.mkdir(parents=True, exist_ok=True)
@@ -609,20 +680,12 @@ def main():
         cst_mean = cst_train.mean(axis=0)
         cst_std = cst_train.std(axis=0) + 1e-6
 
-        def collate(samples):
-            from features.graph_utils import collate_multiscale
-            batch = collate_multiscale(samples)
-            from models.polychain.cst import compute_cst_batch
-            batch["cst"] = torch.tensor(compute_cst_batch([s.smiles for s in samples]),
-                                        dtype=torch.float)
-            return batch
-
         train_loader = DataLoader(train_samples, batch_size=model_cfg.get("batch_size", 32),
-                                  shuffle=True, collate_fn=collate,
+                                  shuffle=True, collate_fn=_collate_polychain,
                                   num_workers=2, pin_memory=True,
                                   persistent_workers=True, prefetch_factor=2)
         val_loader = DataLoader(val_samples, batch_size=model_cfg.get("batch_size", 32),
-                                shuffle=False, collate_fn=collate,
+                                shuffle=False, collate_fn=_collate_polychain,
                                 num_workers=2, pin_memory=True,
                                 persistent_workers=True, prefetch_factor=2)
 
@@ -788,13 +851,7 @@ def main():
             test_samples = [build_multiscale(s) for s in test_feat["SMILES"].tolist()]
             test_samples = [s for s in test_samples if s is not None]
 
-            def collate(samples):
-                from features.graph_utils import collate_multiscale
-                batch = collate_multiscale(samples)
-                batch["cst"] = torch.tensor(compute_cst_batch([s.smiles for s in samples]), dtype=torch.float)
-                return batch
-
-            test_loader = DataLoader(test_samples, batch_size=64, shuffle=False, collate_fn=collate,
+            test_loader = DataLoader(test_samples, batch_size=64, shuffle=False, collate_fn=_collate_polychain,
                                       num_workers=2, pin_memory=True,
                                       persistent_workers=True, prefetch_factor=2)
             model.eval()

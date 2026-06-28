@@ -1,0 +1,4 @@
+model,rmse,mae,r2,n_folds,persons,n_predictions
+lgb,32.905507,19.379996,0.910418,5,anon,6171
+xgb,32.992243,19.254903,0.909945,5,anon,6171
+catboost,33.890338,20.187785,0.904975,5,anon,6171

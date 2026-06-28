@@ -25,6 +25,8 @@ def load_all_oof_predictions(pred_dir: Path, exp: str) -> pd.DataFrame:
     rows = []
     pattern = f"{exp}_*_fold*.pkl"
     for pkl_file in sorted(pred_dir.glob(pattern)):
+        if "_test" in pkl_file.name or "summary" in pkl_file.name:
+            continue
         with open(pkl_file, "rb") as f:
             data = pickle.load(f)
         val_idx = np.asarray(data["val_idx"])
