@@ -66,50 +66,53 @@ def _smiles_scaffold(smiles: str) -> str:
 
 
 def build_periodic_graph_features(smiles_list, n_repeats=3):
-    """
-    Build graph features for periodic polymer structures.
+    """Extract descriptors from periodic polymer graphs (Antoniuk et al. 2022).
     
-    Args:
-        smiles_list: List of SMILES strings
-        n_repeats: Number of repeat units for periodicity
-    
-    Returns:
-        DataFrame with graph features
+    Uses oligomer SMILES to capture chain-level properties that monomer
+    graphs cannot represent.
     """
+    from rdkit.Chem import Descriptors, rdMolDescriptors
     from .periodic_polymer import generate_oligomer_smiles
     
-    features = []
-    
-    for smiles in smiles_list:
+    records = []
+    for smi in smiles_list:
         try:
-            # Generate oligomer
-            oligomer_smiles = generate_oligomer_smiles(smiles, n_repeats)
-            
-            # Parse oligomer
-            mol = Chem.MolFromSmiles(oligomer_smiles)
+            oligomer_smi = generate_oligomer_smiles(smi, n_repeats=n_repeats)
+            mol = Chem.MolFromSmiles(oligomer_smi)
             if mol is None:
-                features.append({})
+                records.append(_empty_periodic_record())
                 continue
             
-            # Extract features from oligomer
-            feat = {
-                'periodic_n_atoms': mol.GetNumAtoms(),
-                'periodic_n_bonds': mol.GetNumBonds(),
-                'periodic_mol_weight': Chem.Descriptors.MolWt(mol),
-                'periodic_logp': Chem.Descriptors.MolLogP(mol),
-                'periodic_tpsa': Chem.Descriptors.TPSA(mol),
-                'periodic_n_rings': mol.GetRingInfo().NumRings(),
-                'periodic_n_aromatic_rings': sum(1 for r in mol.GetRingInfo().AtomRings() 
-                                                if all(mol.GetAtomWithIdx(i).GetIsAromatic() for i in r)),
+            record = {
+                'periodic_mw': Descriptors.MolWt(mol),
+                'periodic_logp': Descriptors.MolLogP(mol),
+                'periodic_tpsa': Descriptors.TPSA(mol),
+                'periodic_hbd': Descriptors.NumHDonors(mol),
+                'periodic_hba': Descriptors.NumHAcceptors(mol),
+                'periodic_rotatable': rdMolDescriptors.CalcNumRotatableBonds(mol),
+                'periodic_rings': rdMolDescriptors.CalcNumRings(mol),
+                'periodic_aromatic_rings': rdMolDescriptors.CalcNumAromaticRings(mol),
+                'periodic_heavy_atoms': mol.GetNumHeavyAtoms(),
+                'periodic_fraction_csp3': rdMolDescriptors.CalcFractionCSP3(mol),
+                'periodic_chain_length': n_repeats,
+                'periodic_mw_per_repeat': Descriptors.MolWt(mol) / n_repeats,
+                'periodic_conjugation_ratio': sum(1 for b in mol.GetBonds() if b.GetIsConjugated()) / max(mol.GetNumBonds(), 1),
+                'periodic_backbone_length': mol.GetNumHeavyAtoms() / n_repeats,
             }
-            
-            features.append(feat)
-            
-        except Exception as e:
-            print(f"Warning: Failed to process {smiles}: {e}")
-            features.append({})
+            records.append(record)
+        except Exception:
+            records.append(_empty_periodic_record())
     
-    return pd.DataFrame(features)
+    return pd.DataFrame(records)
+
+
+def _empty_periodic_record():
+    return {k: 0.0 for k in [
+        'periodic_mw', 'periodic_logp', 'periodic_tpsa', 'periodic_hbd',
+        'periodic_hba', 'periodic_rotatable', 'periodic_rings', 'periodic_aromatic_rings',
+        'periodic_heavy_atoms', 'periodic_fraction_csp3', 'periodic_chain_length',
+        'periodic_mw_per_repeat', 'periodic_conjugation_ratio', 'periodic_backbone_length'
+    ]}
 
 
 def build_features(config_path: str = "config.yaml") -> None:
