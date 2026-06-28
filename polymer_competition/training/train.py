@@ -191,6 +191,231 @@ def build_model(model_type: str, cfg: dict, in_dim: int = None, edge_dim: int = 
 
 
 # ----------------------------------------------------------------------------
+# Multi-task training
+# ----------------------------------------------------------------------------
+def train_multitask(X_tg, y_tg, X_egc, y_egc, config):
+    """
+    Train multi-task model for joint Tg+Egc prediction.
+
+    Args:
+        X_tg: Features for Tg samples
+        y_tg: Tg targets
+        X_egc: Features for Egc samples
+        y_egc: Egc targets
+        config: Configuration dictionary
+
+    Returns:
+        Tuple of (trained multi-task model, common feature names)
+    """
+    from models.multitask import MultiTaskModel
+
+    # Find common features
+    common_features = list(set(X_tg.columns) & set(X_egc.columns))
+    X_tg_common = X_tg[common_features].values
+    X_egc_common = X_egc[common_features].values
+
+    # Pad smaller dataset to match larger
+    max_samples = max(len(X_tg_common), len(X_egc_common))
+    X_combined = np.zeros((max_samples, len(common_features)))
+    y_tg_combined = np.zeros(max_samples)
+    y_egc_combined = np.zeros(max_samples)
+
+    X_combined[:len(X_tg_common)] = X_tg_common
+    y_tg_combined[:len(y_tg)] = y_tg
+
+    X_combined[:len(X_egc_common)] = X_egc_common
+    y_egc_combined[:len(y_egc)] = y_egc
+
+    # Create and train model
+    model = MultiTaskModel(
+        n_features=len(common_features),
+        hidden_dims=[128, 64, 32],
+        dropout=0.2,
+        gamma_egc=100.0
+    )
+
+    model.fit(X_combined, y_tg_combined, y_egc_combined, epochs=100, batch_size=32)
+
+    return model, common_features
+
+
+def apply_target_transform(y, config):
+    """
+    Apply target transformation if configured.
+
+    Args:
+        y: Target values
+        config: Configuration dictionary
+
+    Returns:
+        Tuple of (transformed_y, inverse_func_or_None, transform_name_or_None)
+    """
+    if config.get('use_target_transform', False):
+        from features.target_transforms import select_best_transform
+
+        y_transformed, inv_func, transform_name = select_best_transform(y)
+        print(f"Applied {transform_name} transformation to targets")
+        return y_transformed, inv_func, transform_name
+
+    return y, None, None
+
+
+def train_model(model_type, config, fold=0, target="tg", **kwargs):
+    """
+    Convenience wrapper to train a model by type.
+
+    This function can be imported and called directly (no argparse needed).
+
+    Args:
+        model_type: Model type string (e.g. 'xgb', 'polychain', 'multitask')
+        config: Path to config YAML or dict
+        fold: Fold index (default 0)
+        target: Target name (default 'tg')
+        **kwargs: Additional arguments passed to main training logic
+
+    Returns:
+        dict with metrics and trained model
+    """
+    import sys
+
+    if isinstance(config, (str, Path)):
+        with open(config) as f:
+            cfg = yaml.safe_load(f)
+    else:
+        cfg = config
+
+    seed = cfg.get("seed", {}).get("global", 42)
+    set_seed(seed)
+
+    use_cuda = torch.cuda.is_available() and cfg.get("device", {}).get("use_cuda", True)
+    if use_cuda:
+        try:
+            torch.tensor([1.0], device="cuda").sum()
+        except Exception:
+            use_cuda = False
+    device = torch.device("cuda" if use_cuda else "cpu")
+
+    data_dir = Path(cfg["paths"]["data_dir"])
+    target_col = cfg["data"]["target_col"]
+    exp_ver = cfg.get("experiment", {}).get("version", "v1")
+    ckpt_dir = Path(cfg["paths"].get("checkpoints_dir", "outputs/checkpoints/"))
+
+    train_df = pd.read_parquet(data_dir / "processed" / "features_train.parquet")
+    splits_path = data_dir / f"splits_{target}.pkl"
+
+    try:
+        with open(splits_path, "rb") as f:
+            splits = pickle.load(f)
+    except FileNotFoundError:
+        from data.generate_splits import generate_splits as _make_splits
+        splits = _make_splits(str(splits_path), str(splits_path),
+                              n_folds=cfg["cv"]["n_folds"], seed=seed,
+                              target_col=target_col, smiles_col="SMILES")
+
+    fold_data = splits[fold]
+    train_idx, val_idx = fold_data["train"], fold_data["val"]
+    tr_df = train_df.iloc[train_idx].reset_index(drop=True)
+    va_df = train_df.iloc[val_idx].reset_index(drop=True)
+
+    feature_cols = [c for c in train_df.columns
+                    if c not in ("SMILES", "id", "canon_smiles", "target_type", target_col)]
+
+    model_cfg = cfg.get("model_types", {}).get(model_type, {})
+    if isinstance(model_cfg, dict):
+        model_cfg.update(cfg.get("training", {}))
+
+    if model_type in ("ridge", "xgb", "lgb", "catboost", "rf"):
+        X_tr = tr_df[feature_cols].values
+        y_tr = tr_df[target_col].values
+        X_va = va_df[feature_cols].values
+        y_va = va_df[target_col].values
+
+        scaler = None
+        if model_type in MODELS_NEED_SCALING:
+            scaler = StandardScaler()
+            X_tr = scaler.fit_transform(X_tr)
+            X_va = scaler.transform(X_va)
+
+        model = build_model(model_type, model_cfg, n_features=len(feature_cols))[0]
+        pred_va = train_tabular(model, X_tr, y_tr, X_va, y_va, model_cfg, model_type, device)
+
+        metrics = {
+            "rmse": rmse(y_va, pred_va),
+            "mae": mae(y_va, pred_va),
+            "r2": r2_score(y_va, pred_va),
+            "spearman": spearman(y_va, pred_va),
+        }
+        print(f"[{model_type} | fold {fold}] {metrics}")
+        return {"metrics": metrics, "model": model, "scaler": scaler}
+
+    elif model_type in ("mlp",):
+        from models.mlp import FingerprintMLP
+        X_tr = tr_df[feature_cols].values.astype(np.float32)
+        y_tr = tr_df[target_col].values.astype(np.float32)
+        X_va = va_df[feature_cols].values.astype(np.float32)
+        y_va = va_df[target_col].values.astype(np.float32)
+
+        scaler = StandardScaler()
+        X_tr = scaler.fit_transform(X_tr).astype(np.float32)
+        X_va = scaler.transform(X_va).astype(np.float32)
+
+        model = FingerprintMLP(in_dim=X_tr.shape[1]).to(device)
+        opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-5)
+        sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=100)
+        crit = nn.MSELoss()
+
+        best_val_rmse = float("inf")
+        best_state = None
+        patience = 20
+        bad = 0
+
+        for ep in range(1, 101):
+            model.train()
+            idx = np.random.permutation(len(X_tr))
+            for i in range(0, len(X_tr), 64):
+                b = idx[i:i+64]
+                xb = torch.from_numpy(X_tr[b]).to(device)
+                yb = torch.from_numpy(y_tr[b]).to(device)
+                opt.zero_grad()
+                loss = crit(model(xb).squeeze(-1), yb)
+                loss.backward()
+                opt.step()
+            sched.step()
+
+            model.eval()
+            with torch.no_grad():
+                pred_va = model(torch.from_numpy(X_va).to(device)).squeeze(-1).cpu().numpy()
+            val_rmse = float(np.sqrt(np.mean((y_va - pred_va) ** 2)))
+            if val_rmse < best_val_rmse:
+                best_val_rmse = val_rmse
+                best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+                bad = 0
+            else:
+                bad += 1
+                if bad >= patience:
+                    break
+
+        if best_state is not None:
+            model.load_state_dict(best_state)
+        model.eval()
+        with torch.no_grad():
+            pred_va = model(torch.from_numpy(X_va).to(device)).squeeze(-1).cpu().numpy()
+
+        metrics = {
+            "rmse": rmse(y_va, pred_va),
+            "mae": mae(y_va, pred_va),
+            "r2": r2_score(y_va, pred_va),
+            "spearman": spearman(y_va, pred_va),
+        }
+        print(f"[{model_type} | fold {fold}] {metrics}")
+        return {"metrics": metrics, "model": model, "scaler": scaler}
+
+    else:
+        raise ValueError(f"train_model not supported for model_type={model_type}. "
+                         f"Use CLI entry point (python -m training.train) for graph models.")
+
+
+# ----------------------------------------------------------------------------
 # Tabular trainer (baselines, tree models, MLPs on features)
 # ----------------------------------------------------------------------------
 def train_tabular(model, X_train, y_train, X_val, y_val, cfg, model_type, device):

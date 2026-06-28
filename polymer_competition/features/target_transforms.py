@@ -114,10 +114,14 @@ def select_best_transform(y: np.ndarray) -> Tuple[np.ndarray, Callable, str]:
 
     if skewness > 2:
         if y.min() > 0:
-            return log_transform(y), "log"
+            y_trans, inv_func = log_transform(y)
+            return y_trans, inv_func, "log"
         else:
-            return boxcox_transform(y), "boxcox"
+            y_trans, inv_func = boxcox_transform(y)
+            return y_trans, inv_func, "boxcox"
     elif skewness > 1:
-        return boxcox_transform(y), "boxcox"
+        y_trans, inv_func = boxcox_transform(y)
+        return y_trans, inv_func, "boxcox"
     else:
-        return quantile_transform(y), "quantile"
+        y_trans, inv_func = quantile_transform(y)
+        return y_trans, inv_func, "quantile"
