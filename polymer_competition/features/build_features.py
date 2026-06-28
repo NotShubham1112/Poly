@@ -12,7 +12,6 @@ import pandas as pd
 import yaml
 from rdkit import Chem
 from rdkit import __version__ as rdkit_version
-from sklearn.impute import SimpleImputer
 from sklearn.model_selection import GroupKFold
 
 from .fingerprints import all_fingerprints
@@ -202,12 +201,10 @@ def build_features(config_path: str = "config.yaml") -> None:
         col_vals = cache_df[col].values
         if np.isinf(col_vals).any():
             cache_df[col] = np.where(np.isinf(col_vals), np.nan, col_vals)
-    imputer = SimpleImputer(strategy="median")
-    cache_df[num_cols] = imputer.fit_transform(cache_df[num_cols]).astype(np.float32)
-
-    # Apply FeaturePreprocessor for additional cleaning and feature selection
+    # Apply FeaturePreprocessor for imputation, cleaning, and MI-based feature selection
+    y_train_combined = train["target"].values
     preprocessor = FeaturePreprocessor()
-    preprocessor.fit(cache_df[num_cols])
+    preprocessor.fit(cache_df.iloc[:len(train)][num_cols], y=y_train_combined)
     cache_df[num_cols] = preprocessor.transform(cache_df[num_cols], scale=False)
 
     canon_to_idx = {s: i for i, s in enumerate(cache_df["canon_smiles"].values)}
