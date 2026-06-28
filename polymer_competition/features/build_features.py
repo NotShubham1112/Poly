@@ -19,6 +19,7 @@ from .descriptors import compute_descriptors, select_descriptors_by_variance
 from .custom_polymer import compute_all_custom_features
 from .polymer_descriptors import compute_polymer_descriptors
 from .advanced_descriptors import compute_all_advanced_features
+from .interactions import compute_fingerprint_descriptor_interactions, compute_descriptor_ratios
 from .preprocessing import FeaturePreprocessor
 from data.split_by_target import split_by_target
 
@@ -169,6 +170,13 @@ def build_features(config_path: str = "config.yaml") -> None:
     desc_df = desc.drop(columns=["SMILES"], errors="ignore")
     cust_df = cust.drop(columns=["SMILES"], errors="ignore")
 
+    # Build interaction features
+    print("Building interaction features...")
+    all_fp_df = pd.concat(fp_dfs.values(), axis=1).reset_index(drop=True)
+    interactions_df = compute_fingerprint_descriptor_interactions(all_fp_df, desc_df.reset_index(drop=True), top_k=30)
+    ratios_df = compute_descriptor_ratios(desc_df.reset_index(drop=True))
+    print(f"  Added {interactions_df.shape[1]} interaction features, {ratios_df.shape[1]} descriptor ratios")
+
     # Free intermediate DataFrames before building the large cache
     del fps, desc, cust
     gc.collect()
@@ -180,7 +188,9 @@ def build_features(config_path: str = "config.yaml") -> None:
         + [cust_df.reset_index(drop=True).astype(np.float32)]
         + [poly_df.astype(np.float32)]
         + [periodic_features.astype(np.float32)]
-        + [advanced_df.astype(np.float32)],
+        + [advanced_df.astype(np.float32)]
+        + [interactions_df.astype(np.float32)]
+        + [ratios_df.astype(np.float32)],
         axis=1,
     )
 
