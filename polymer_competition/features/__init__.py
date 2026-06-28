@@ -8,4 +8,5 @@ Modules:
     custom_polymer : Polymer-specific features (asterisks, rigidity, H-bond density)
     build_features : Master function that merges everything into a feature matrix
     graph_utils    : Helpers for multi-scale graph construction (shared with PolyChain)
+    target_transforms : Box-Cox, quantile, and log transforms for targets
 """
