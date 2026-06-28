@@ -193,49 +193,300 @@ def build_model(model_type: str, cfg: dict, in_dim: int = None, edge_dim: int = 
 # ----------------------------------------------------------------------------
 # Multi-task training
 # ----------------------------------------------------------------------------
-def train_multitask(X_tg, y_tg, X_egc, y_egc, config):
-    """
-    Train multi-task model for joint Tg+Egc prediction.
+def train_multitask_per_fold(cfg: dict, fold: int, exp_ver: str,
+                              ckpt_dir: Path, pred_dir: Path,
+                              data_dir: Path, seed: int,
+                              device: torch.device):
+    """Run one fold of multi-task training and write OOF + test pickles.
 
-    Args:
-        X_tg: Features for Tg samples
-        y_tg: Tg targets
-        X_egc: Features for Egc samples
-        y_egc: Egc targets
-        config: Configuration dictionary
+    The fold structure comes from ``splits_tg.pkl`` (the larger dataset). Tg
+    rows in the val split contribute to the Tg OOF pickle; Egc rows in the
+    Egc val split contribute to the Egc OOF pickle. Train rows from both
+    targets are concatenated and trained jointly with masks.
 
-    Returns:
-        Tuple of (trained multi-task model, common feature names)
+    Pickle filenames match the ``weight_optimizer`` glob pattern:
+
+        {exp_ver}_{target}_multitask_fold{k}.pkl
+        {exp_ver}_{target}_multitask_fold{k}_test.pkl
     """
     from models.multitask import MultiTaskModel
 
-    # Find common features
-    common_features = list(set(X_tg.columns) & set(X_egc.columns))
-    X_tg_common = X_tg[common_features].values
-    X_egc_common = X_egc[common_features].values
+    mt_cfg = cfg.get("multitask", {})
+    epochs = mt_cfg.get("epochs", 100)
+    log = {"fold": fold, "target": "joint"}
 
-    # Pad smaller dataset to match larger
-    max_samples = max(len(X_tg_common), len(X_egc_common))
-    X_combined = np.zeros((max_samples, len(common_features)))
-    y_tg_combined = np.zeros(max_samples)
-    y_egc_combined = np.zeros(max_samples)
+    splits_tg_path = data_dir / "splits_tg.pkl"
+    splits_egc_path = data_dir / "splits_egc.pkl"
+    with open(splits_tg_path, "rb") as f:
+        splits_tg = pickle.load(f)
+    with open(splits_egc_path, "rb") as f:
+        splits_egc = pickle.load(f)
 
-    X_combined[:len(X_tg_common)] = X_tg_common
-    y_tg_combined[:len(y_tg)] = y_tg
+    if fold >= len(splits_tg) or fold >= len(splits_egc):
+        raise ValueError(f"fold {fold} not present in tg/egc splits")
 
-    X_combined[:len(X_egc_common)] = X_egc_common
-    y_egc_combined[:len(y_egc)] = y_egc
+    target_col = cfg["data"]["target_col"]
+    train_feat = pd.read_parquet(data_dir / "processed" / "features_train.parquet")
 
-    # Create and train model
-    model = MultiTaskModel(
-        n_features=len(common_features),
-        hidden_dims=[128, 64, 32],
-        dropout=0.2,
-        gamma_egc=100.0
+    # Tg fold
+    tg_train_idx, tg_val_idx = splits_tg[fold]["train"], splits_tg[fold]["val"]
+    tg_train_df = train_feat.iloc[tg_train_idx].reset_index(drop=True)
+    tg_val_df = train_feat.iloc[tg_val_idx].reset_index(drop=True)
+    # Filter to Tg rows only (target_type == "tg"); val set may contain both types
+    tg_train_df = tg_train_df[tg_train_df["target_type"] == "tg"].reset_index(drop=True)
+    tg_val_df = tg_val_df[tg_val_df["target_type"] == "tg"].reset_index(drop=True)
+
+    # Egc fold
+    egc_train_idx, egc_val_idx = splits_egc[fold]["train"], splits_egc[fold]["val"]
+    egc_train_df = train_feat.iloc[egc_train_idx].reset_index(drop=True)
+    egc_val_df = train_feat.iloc[egc_val_idx].reset_index(drop=True)
+    egc_train_df = egc_train_df[egc_train_df["target_type"] == "egc"].reset_index(drop=True)
+    egc_val_df = egc_val_df[egc_val_df["target_type"] == "egc"].reset_index(drop=True)
+
+    feature_cols = [c for c in train_feat.columns
+                    if c not in ("SMILES", "id", "canon_smiles", "target_type", target_col)]
+
+    X_tg_tr = tg_train_df[feature_cols]
+    y_tg_tr = tg_train_df[target_col].values.astype(np.float32)
+    X_egc_tr = egc_train_df[feature_cols]
+    y_egc_tr = egc_train_df[target_col].values.astype(np.float32)
+
+    model, common_features, oof_train = train_multitask(
+        X_tg_tr, y_tg_tr, X_egc_tr, y_egc_tr, cfg, device=device, return_oof=True,
     )
 
-    model.fit(X_combined, y_tg_combined, y_egc_combined, epochs=100, batch_size=32)
+    # Inference on Tg val set (predict Tg head only)
+    model.eval()
+    from sklearn.preprocessing import StandardScaler
+    X_val_tg = tg_val_df[common_features].values.astype(np.float32)
+    if X_val_tg.size > 0:
+        X_val_tg_scaled = model._scaler_X.transform(X_val_tg).astype(np.float32)
+        with torch.no_grad():
+            tg_pred_n, _ = model(torch.from_numpy(X_val_tg_scaled).to(device))
+        tg_val_pred = model._y_scaler_tg.inverse_transform(
+            tg_pred_n.cpu().numpy().reshape(-1, 1)).flatten()
+        y_val_tg = tg_val_df[target_col].values.astype(np.float32)
+    else:
+        tg_val_pred = np.zeros(0)
+        y_val_tg = np.zeros(0)
 
+    X_val_egc = egc_val_df[common_features].values.astype(np.float32)
+    if X_val_egc.size > 0:
+        X_val_egc_scaled = model._scaler_X.transform(X_val_egc).astype(np.float32)
+        with torch.no_grad():
+            _, egc_pred_n = model(torch.from_numpy(X_val_egc_scaled).to(device))
+        egc_val_pred = model._y_scaler_egc.inverse_transform(
+            egc_pred_n.cpu().numpy().reshape(-1, 1)).flatten()
+        y_val_egc = egc_val_df[target_col].values.astype(np.float32)
+    else:
+        egc_val_pred = np.zeros(0)
+        y_val_egc = np.zeros(0)
+
+    pred_dir.mkdir(parents=True, exist_ok=True)
+    if len(tg_val_pred) > 0:
+        out_tg = pred_dir / f"{exp_ver}_tg_multitask_fold{fold}.pkl"
+        with open(out_tg, "wb") as f:
+            pickle.dump({"val_idx": tg_val_idx[:len(tg_val_pred)].tolist(),
+                         "pred": tg_val_pred, "y": y_val_tg,
+                         "model_type": "multitask", "fold": fold, "target": "tg"}, f)
+        print(f"Saved tg multitask OOF -> {out_tg}")
+    if len(egc_val_pred) > 0:
+        out_egc = pred_dir / f"{exp_ver}_egc_multitask_fold{fold}.pkl"
+        with open(out_egc, "wb") as f:
+            pickle.dump({"val_idx": egc_val_idx[:len(egc_val_pred)].tolist(),
+                         "pred": egc_val_pred, "y": y_val_egc,
+                         "model_type": "multitask", "fold": fold, "target": "egc"}, f)
+        print(f"Saved egc multitask OOF -> {out_egc}")
+
+    # Persist checkpoint with learned uncertainty parameters
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_tag = f"{exp_ver}_multitask_fold{fold}"
+    payload = {
+        "model_state": model.state_dict(),
+        "model_type": "multitask",
+        "fold": fold,
+        "epoch": epochs,
+        "val_rmse": float("nan"),
+        "config": cfg.get("multitask", {}),
+        "common_features": common_features,
+        "log_var_tg": float(model.log_var_tg.detach().cpu().item()),
+        "log_var_egc": float(model.log_var_egc.detach().cpu().item()),
+        "scaler_X": model._scaler_X,
+        "y_scaler_tg": model._y_scaler_tg,
+        "y_scaler_egc": model._y_scaler_egc,
+    }
+    save_checkpoint(payload, ckpt_dir / f"{ckpt_tag}_best.pt")
+    save_checkpoint(payload, ckpt_dir / f"{ckpt_tag}_final.pt")
+
+    return {
+        "log_var_tg": payload["log_var_tg"],
+        "log_var_egc": payload["log_var_egc"],
+        "n_tg_train": len(y_tg_tr),
+        "n_egc_train": len(y_egc_tr),
+        "n_tg_val_pred": len(tg_val_pred),
+        "n_egc_val_pred": len(egc_val_pred),
+    }
+
+
+def train_multitask(X_tg, y_tg, X_egc, y_egc, config,
+                    device: torch.device = None,
+                    return_oof: bool = False):
+    """Train the multi-task MLP on (Tg ∪ Egc) samples with uncertainty weighting.
+
+    The Tg dataset (~4143 samples) and the Egc dataset (~2028 samples) are
+    concatenated and the smaller subset is NOT zero-padded: each row carries a
+    boolean mask saying which targets it contributes to. The Kendall-style
+    multi-task loss in :class:`MultiTaskModel` consumes those masks and only
+    back-propagates the per-head loss on present samples.
+
+    Args:
+        X_tg: Tg feature matrix (DataFrame).
+        y_tg: Tg targets (1-D array).
+        X_egc: Egc feature matrix (DataFrame).
+        y_egc: Egc targets (1-D array).
+        config: Training config dict. Recognized keys:
+            - ``multitask.hidden_dims`` (default ``[256, 128, 64]``)
+            - ``multitask.dropout`` (default ``0.2``)
+            - ``multitask.epochs`` (default ``100``)
+            - ``multitask.batch_size`` (default ``64``)
+            - ``multitask.lr`` (default ``1e-3``)
+            - ``multitask.weight_decay`` (default ``1e-5``)
+            - ``multitask.patience`` (default ``20``)
+            - ``multitask.seed`` (default ``42``)
+        device: Optional torch device. Defaults to CUDA if available else CPU.
+        return_oof: If True, also return per-target predictions for the
+            provided samples (in original order).
+
+    Returns:
+        Tuple ``(model, common_features)`` by default. When ``return_oof=True``,
+        additionally returns ``{"tg_pred": ..., "egc_pred": ..., "y_tg": y_tg,
+        "y_egc": y_egc}`` as a fourth element.
+    """
+    from torch.utils.data import DataLoader, TensorDataset
+    from models.multitask import MultiTaskModel
+    from sklearn.preprocessing import StandardScaler
+
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    mt_cfg = config.get("multitask", {}) if isinstance(config, dict) else {}
+    hidden_dims = mt_cfg.get("hidden_dims", [256, 128, 64])
+    dropout = mt_cfg.get("dropout", 0.2)
+    epochs = mt_cfg.get("epochs", 100)
+    batch_size = mt_cfg.get("batch_size", 64)
+    lr = mt_cfg.get("lr", 1e-3)
+    weight_decay = mt_cfg.get("weight_decay", 1e-5)
+    patience = mt_cfg.get("patience", 20)
+    seed = mt_cfg.get("seed", 42)
+
+    common_features = sorted(set(X_tg.columns) & set(X_egc.columns))
+    if not common_features:
+        raise ValueError("No common features between Tg and Egc feature sets.")
+
+    X_tg_arr = X_tg[common_features].values.astype(np.float32)
+    X_egc_arr = X_egc[common_features].values.astype(np.float32)
+
+    # Standardise features jointly so both targets live in the same space.
+    scaler = StandardScaler()
+    X_all = np.vstack([X_tg_arr, X_egc_arr])
+    scaler.fit(X_all)
+    X_tg_scaled = scaler.transform(X_tg_arr).astype(np.float32)
+    X_egc_scaled = scaler.transform(X_egc_arr).astype(np.float32)
+
+    # Build a single concatenated tensor of features with two boolean masks.
+    # Tg samples: tg_mask=True,  egc_mask=False
+    # Egc samples: tg_mask=False, egc_mask=True
+    n_tg, n_egc = len(X_tg_scaled), len(X_egc_scaled)
+    X_concat = np.vstack([X_tg_scaled, X_egc_scaled]).astype(np.float32)
+    tg_mask = np.zeros(n_tg + n_egc, dtype=bool)
+    egc_mask = np.zeros(n_tg + n_egc, dtype=bool)
+    tg_mask[:n_tg] = True
+    egc_mask[n_tg:] = True
+
+    # Standardise targets per-head so the shared encoder and the
+    # uncertainty-weighted loss live on comparable scales.
+    y_scaler_tg = StandardScaler()
+    y_scaler_egc = StandardScaler()
+    y_tg_norm = y_scaler_tg.fit_transform(y_tg.reshape(-1, 1)).flatten().astype(np.float32)
+    y_egc_norm = y_scaler_egc.fit_transform(y_egc.reshape(-1, 1)).flatten().astype(np.float32)
+    y_norm = np.zeros(n_tg + n_egc, dtype=np.float32)
+    y_norm[:n_tg] = y_tg_norm
+    y_norm[n_tg:] = y_egc_norm
+
+    X_tensor = torch.from_numpy(X_concat)
+    y_tensor = torch.from_numpy(y_norm)
+    tg_mask_tensor = torch.from_numpy(tg_mask)
+    egc_mask_tensor = torch.from_numpy(egc_mask)
+
+    dataset = TensorDataset(X_tensor, y_tensor, tg_mask_tensor, egc_mask_tensor)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True,
+                        num_workers=0, drop_last=False)
+
+    model = MultiTaskModel(n_features=X_concat.shape[1],
+                           hidden_dims=hidden_dims,
+                           dropout=dropout).to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr,
+                                  weight_decay=weight_decay)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+
+    best_loss = float("inf")
+    best_state = None
+    bad = 0
+
+    for epoch in range(1, epochs + 1):
+        model.train()
+        epoch_loss = 0.0
+        n_batches = 0
+        for xb, yb, tgb, egb in loader:
+            xb = xb.to(device)
+            yb = yb.to(device)
+            tgb = tgb.to(device)
+            egb = egb.to(device)
+            optimizer.zero_grad()
+            tg_pred, egc_pred = model(xb)
+            loss, _logs = model.loss(tg_pred, egc_pred, yb, yb, tgb, egb)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            epoch_loss += loss.item()
+            n_batches += 1
+        scheduler.step()
+        avg_loss = epoch_loss / max(n_batches, 1)
+
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            bad = 0
+        else:
+            bad += 1
+            if bad >= patience:
+                break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+    model.eval()
+
+    # Attach the scalers + mask bookkeeping to the model so callers can run
+    # inference on new data without re-deriving the schema.
+    model._scaler_X = scaler
+    model._y_scaler_tg = y_scaler_tg
+    model._y_scaler_egc = y_scaler_egc
+    model._common_features = common_features
+
+    if return_oof:
+        with torch.no_grad():
+            tg_pred_n, egc_pred_n = model(X_tensor.to(device))
+        tg_pred_n = tg_pred_n.cpu().numpy()
+        egc_pred_n = egc_pred_n.cpu().numpy()
+        tg_pred = y_scaler_tg.inverse_transform(tg_pred_n[:n_tg].reshape(-1, 1)).flatten()
+        egc_pred = y_scaler_egc.inverse_transform(egc_pred_n[n_tg:].reshape(-1, 1)).flatten()
+        oof = {
+            "tg_pred": tg_pred,
+            "egc_pred": egc_pred,
+            "y_tg": np.asarray(y_tg),
+            "y_egc": np.asarray(y_egc),
+        }
+        return model, common_features, oof
     return model, common_features
 
 
@@ -643,6 +894,9 @@ def main():
                         help="Save recovery checkpoint every N epochs (0 to disable)")
     parser.add_argument("--target", default=None,
                         help="Target name (tg/egc). Loads target-specific features and splits.")
+    parser.add_argument("--multitask", action="store_true",
+                        help="Train the multi-task MLP jointly on Tg+Egc with "
+                             "uncertainty weighting. Writes OOF for both targets.")
     parser.add_argument("--skip_inference", action="store_true",
                         help="Skip test inference after training.")
     args = parser.parse_args()
@@ -790,6 +1044,32 @@ def main():
     if transform_name is not None:
         tr_df[target_col] = y_tr_raw
         print(f"Applied target transform: {transform_name}")
+
+    if args.multitask or args.model_type == "multitask":
+        # Multi-task training produces OOF for both tg and egc in one pass.
+        pred_dir = Path(cfg["paths"]["predictions_dir"])
+        info = train_multitask_per_fold(
+            cfg=cfg, fold=args.fold, exp_ver=exp_ver,
+            ckpt_dir=ckpt_dir, pred_dir=pred_dir, data_dir=data_dir,
+            seed=seed, device=device,
+        )
+        print(f"[multitask | fold {args.fold}] {json.dumps(info)}")
+
+        from experiments.manifest import record_run
+        record_run(
+            experiment=exp_ver, target="joint", model_type="multitask",
+            fold=args.fold, score=None,
+            checkpoint=str(ckpt_dir / f"{exp_ver}_multitask_fold{args.fold}_best.pt"),
+            duration_sec=int(time.time() - t_start), seed=seed,
+            config_path=args.config,
+        )
+
+        _gpu_monitor._running = False
+        try:
+            monitor_thread.join(timeout=5)
+        except Exception:
+            pass
+        return
 
     if args.model_type in ("ridge", "xgb", "lgb", "catboost", "rf"):
         X_tr = tr_df[feature_cols].values
