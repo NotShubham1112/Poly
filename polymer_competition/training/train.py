@@ -341,14 +341,21 @@ def train_multitask_per_fold(cfg: dict, fold: int, exp_ver: str,
             egc_test_pred.reshape(-1, 1)
         ).ravel()
 
-    # Write per-target test pickles (one fold each, schema matches other models)
-    test_ids = test_feat_full["id"].values.tolist()
-    for target, preds in [("tg", tg_test_pred), ("egc", egc_test_pred)]:
+    # Per-target test ids (tg test set is smaller than the combined test set;
+    # egc test set is also a disjoint subset).
+    all_test_ids = test_feat_full["id"].values
+    pred_by_target = {"tg": tg_test_pred, "egc": egc_test_pred}
+    for target, all_preds in pred_by_target.items():
+        target_test_csv = data_dir / target / "test.csv"
+        target_ids = pd.read_csv(target_test_csv)["id"].values
+        # Reindex predictions to target-specific test ids
+        id_to_pred = dict(zip(all_test_ids.tolist(), all_preds.tolist()))
+        target_preds = [id_to_pred[i] for i in target_ids.tolist()]
         test_out = pred_dir / f"{exp_ver}_{target}_multitask_fold{fold}_test.pkl"
         with open(test_out, "wb") as f:
             pickle.dump({
-                "id": test_ids,
-                "pred": preds.tolist(),
+                "id": target_ids.tolist(),
+                "pred": target_preds,
                 "model_type": "multitask",
                 "fold": fold,
                 "target": target,
