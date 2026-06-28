@@ -250,14 +250,18 @@ def apply_target_transform(y, config):
     Returns:
         Tuple of (transformed_y, inverse_func_or_None, transform_name_or_None)
     """
-    if config.get('use_target_transform', False):
-        from features.target_transforms import select_best_transform
+    enabled = (
+        config.get('use_target_transform', False) or
+        config.get('training', {}).get('target_transforms', {}).get('enabled', False)
+    )
+    if not enabled:
+        return y, None, None
 
-        y_transformed, inv_func, transform_name = select_best_transform(y)
-        print(f"Applied {transform_name} transformation to targets")
-        return y_transformed, inv_func, transform_name
+    from features.target_transforms import select_best_transform
 
-    return y, None, None
+    y_transformed, inv_func, transform_name = select_best_transform(y)
+    print(f"Applied {transform_name} transformation to targets")
+    return y_transformed, inv_func, transform_name
 
 
 def train_model(model_type, config, fold=0, target="tg", **kwargs):
@@ -780,6 +784,13 @@ def main():
                     if c not in ("SMILES", "id", "canon_smiles", "target_type", target_col)]
     scaler = None
 
+    # Apply target transform
+    y_tr_raw = tr_df[target_col].values
+    y_tr_raw, inv_func, transform_name = apply_target_transform(y_tr_raw, cfg)
+    if transform_name is not None:
+        tr_df[target_col] = y_tr_raw
+        print(f"Applied target transform: {transform_name}")
+
     if args.model_type in ("ridge", "xgb", "lgb", "catboost", "rf"):
         X_tr = tr_df[feature_cols].values
         y_tr = tr_df[target_col].values
@@ -1018,6 +1029,9 @@ def main():
 
     # Metrics
     y_va = va_df[target_col].values
+    # Inverse-transform predictions if target transform was applied
+    if transform_name is not None:
+        pred_va = inv_func(pred_va)
     metrics = {
         "rmse": rmse(y_va, pred_va),
         "mae": mae(y_va, pred_va),
@@ -1103,6 +1117,10 @@ def main():
                     pred = model(batch)
                     test_preds.append(pred.cpu().numpy())
             test_preds = np.concatenate(test_preds)
+
+        # Inverse-transform test predictions if target transform was applied
+        if transform_name is not None:
+            test_preds = inv_func(test_preds)
 
         test_out = pred_dir / f"{exp_ver}_{target}_{args.model_type}_fold{args.fold}_test.pkl"
         with open(test_out, "wb") as f:
