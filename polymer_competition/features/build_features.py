@@ -19,6 +19,7 @@ from .fingerprints import all_fingerprints
 from .descriptors import compute_descriptors, select_descriptors_by_variance
 from .custom_polymer import compute_all_custom_features
 from .polymer_descriptors import compute_polymer_descriptors
+from .advanced_descriptors import compute_all_advanced_features
 from data.split_by_target import split_by_target
 
 
@@ -151,6 +152,16 @@ def build_features(config_path: str = "config.yaml") -> None:
     periodic_features = build_periodic_graph_features(unique_smiles, n_repeats=3)
     print(f"  Added {periodic_features.shape[1]} periodic graph features")
 
+    # Build advanced polymer features
+    print("Building advanced polymer features...")
+    advanced_features = []
+    for smiles in unique_smiles:
+        mol = Chem.MolFromSmiles(smiles)
+        feat = compute_all_advanced_features(mol)
+        advanced_features.append(feat)
+    advanced_df = pd.DataFrame(advanced_features)
+    print(f"  Added {advanced_df.shape[1]} advanced polymer features")
+
     fp_dfs = {}
     for name, arr in fps.items():
         cols = [f"{name}_{i}" for i in range(arr.shape[1])]
@@ -168,7 +179,8 @@ def build_features(config_path: str = "config.yaml") -> None:
         + [desc_df.reset_index(drop=True).astype(np.float32)]
         + [cust_df.reset_index(drop=True).astype(np.float32)]
         + [poly_df.astype(np.float32)]
-        + [periodic_features.astype(np.float32)],
+        + [periodic_features.astype(np.float32)]
+        + [advanced_df.astype(np.float32)],
         axis=1,
     )
 
