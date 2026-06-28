@@ -43,6 +43,19 @@ features:
   interaction_features: false
   use_embeddings: false
   embedding_model: null
+  
+  # Advanced polymer features
+  advanced_features:
+    enabled: true
+    hansen_solubility: true
+    free_volume: true
+    chain_flexibility: true
+    conjugation_length: true
+  
+  # Periodic polymer graphs
+  periodic_graphs:
+    enabled: true
+    n_repeats: 3
 
 targets:
   tg:
@@ -63,6 +76,18 @@ training:
   prefetch_factor: 2
   batch_size_search: true
   grad_accumulation_steps: 2
+  
+  # Multi-task learning
+  multitask:
+    enabled: true
+    gamma_egc: 100.0
+    hidden_dims: [128, 64, 32]
+    dropout: 0.2
+  
+  # Target transformations
+  target_transforms:
+    enabled: true
+    auto_select: true
 
 device:
   use_cuda: true
@@ -76,6 +101,11 @@ ensemble:
   stage2_threshold: 0.002
   min_weight: 0.0
   max_weight: 1.0
+  
+  # Level-2 stacking
+  level2_stacking:
+    enabled: true
+    meta_learners: [ridge, elasticnet, lgbm]
 
 model_types:
   polychain:
