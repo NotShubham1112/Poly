@@ -63,6 +63,53 @@ def _smiles_scaffold(smiles: str) -> str:
     return s[:20]
 
 
+def build_periodic_graph_features(smiles_list, n_repeats=3):
+    """
+    Build graph features for periodic polymer structures.
+    
+    Args:
+        smiles_list: List of SMILES strings
+        n_repeats: Number of repeat units for periodicity
+    
+    Returns:
+        DataFrame with graph features
+    """
+    from .periodic_polymer import generate_oligomer_smiles
+    
+    features = []
+    
+    for smiles in smiles_list:
+        try:
+            # Generate oligomer
+            oligomer_smiles = generate_oligomer_smiles(smiles, n_repeats)
+            
+            # Parse oligomer
+            mol = Chem.MolFromSmiles(oligomer_smiles)
+            if mol is None:
+                features.append({})
+                continue
+            
+            # Extract features from oligomer
+            feat = {
+                'periodic_n_atoms': mol.GetNumAtoms(),
+                'periodic_n_bonds': mol.GetNumBonds(),
+                'periodic_mol_weight': Chem.Descriptors.MolWt(mol),
+                'periodic_logp': Chem.Descriptors.MolLogP(mol),
+                'periodic_tpsa': Chem.Descriptors.TPSA(mol),
+                'periodic_n_rings': mol.GetRingInfo().NumRings(),
+                'periodic_n_aromatic_rings': sum(1 for r in mol.GetRingInfo().AtomRings() 
+                                                if all(mol.GetAtomWithIdx(i).GetIsAromatic() for i in r)),
+            }
+            
+            features.append(feat)
+            
+        except Exception as e:
+            print(f"Warning: Failed to process {smiles}: {e}")
+            features.append({})
+    
+    return pd.DataFrame(features)
+
+
 def build_features(config_path: str = "config.yaml") -> None:
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
@@ -98,6 +145,11 @@ def build_features(config_path: str = "config.yaml") -> None:
     cust = compute_all_custom_features(unique_smiles)
     poly_desc = [compute_polymer_descriptors(s) for s in unique_smiles]
     poly_df = pd.DataFrame(poly_desc).add_prefix("polymer_")
+    
+    # Build periodic graph features
+    print("Building periodic graph features...")
+    periodic_features = build_periodic_graph_features(unique_smiles, n_repeats=3)
+    print(f"  Added {periodic_features.shape[1]} periodic graph features")
 
     fp_dfs = {}
     for name, arr in fps.items():
@@ -115,7 +167,8 @@ def build_features(config_path: str = "config.yaml") -> None:
         + [df.astype(np.float32) for df in fp_dfs.values()]
         + [desc_df.reset_index(drop=True).astype(np.float32)]
         + [cust_df.reset_index(drop=True).astype(np.float32)]
-        + [poly_df.astype(np.float32)],
+        + [poly_df.astype(np.float32)]
+        + [periodic_features.astype(np.float32)],
         axis=1,
     )
 
