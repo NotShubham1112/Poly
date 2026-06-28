@@ -315,6 +315,46 @@ def train_multitask_per_fold(cfg: dict, fold: int, exp_ver: str,
                          "model_type": "multitask", "fold": fold, "target": "egc"}, f)
         print(f"Saved egc multitask OOF -> {out_egc}")
 
+    # Test inference — both targets (multitask predicts both heads)
+    test_feat_full = pd.read_parquet(data_dir / "processed" / "features_test.parquet")
+    # Filter to common feature columns (same as training)
+    test_feat_cols = [c for c in test_feat_full.columns if c in common_features]
+    X_test = test_feat_full[test_feat_cols].values.astype(np.float32)
+    # Apply the same X-scaler used during training
+    if model._scaler_X is not None:
+        X_test = model._scaler_X.transform(X_test)
+    model.eval()
+    with torch.no_grad():
+        tg_test_pred_t, egc_test_pred_t = model(
+            torch.from_numpy(X_test).to(device)
+        )
+        tg_test_pred = tg_test_pred_t.cpu().numpy()
+        egc_test_pred = egc_test_pred_t.cpu().numpy()
+
+    # Inverse-transform each target's predictions
+    if model._y_scaler_tg is not None:
+        tg_test_pred = model._y_scaler_tg.inverse_transform(
+            tg_test_pred.reshape(-1, 1)
+        ).ravel()
+    if model._y_scaler_egc is not None:
+        egc_test_pred = model._y_scaler_egc.inverse_transform(
+            egc_test_pred.reshape(-1, 1)
+        ).ravel()
+
+    # Write per-target test pickles (one fold each, schema matches other models)
+    test_ids = test_feat_full["id"].values.tolist()
+    for target, preds in [("tg", tg_test_pred), ("egc", egc_test_pred)]:
+        test_out = pred_dir / f"{exp_ver}_{target}_multitask_fold{fold}_test.pkl"
+        with open(test_out, "wb") as f:
+            pickle.dump({
+                "id": test_ids,
+                "pred": preds.tolist(),
+                "model_type": "multitask",
+                "fold": fold,
+                "target": target,
+            }, f)
+        print(f"Saved {target} multitask test preds -> {test_out}")
+
     # Persist checkpoint with learned uncertainty parameters
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     ckpt_tag = f"{exp_ver}_multitask_fold{fold}"
