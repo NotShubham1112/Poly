@@ -115,6 +115,46 @@ def _empty_periodic_record():
     ]}
 
 
+def load_gnn_embeddings(exp_ver, target, n_folds, all_ids) -> pd.DataFrame:
+    """Load GNN embeddings from saved .npy files.
+
+    Only reads val embeddings (features/embeddings/*/fold*_val.npy) for
+    training feature construction. Test embeddings (*_test.npy) are saved
+    by train.py for downstream inference but not consumed here.
+    """
+    import numpy as np
+    from pathlib import Path
+
+    emb_dicts = []
+    for fold in range(n_folds):
+        path = Path(f"features/embeddings/{exp_ver}_{target}/fold{fold}_val.npy")
+        if path.exists():
+            fold_embs = np.load(path, allow_pickle=True).item()
+            emb_dicts.append(fold_embs)
+    if not emb_dicts:
+        return pd.DataFrame()
+    all_ids_flat = []
+    for item in all_ids:
+        if isinstance(item, list):
+            all_ids_flat.extend(item)
+        else:
+            all_ids_flat.append(item)
+    unique_ids = sorted(set(all_ids_flat))
+    if not emb_dicts[0]:
+        return pd.DataFrame()
+    emb_dim = len(next(iter(emb_dicts[0].values())))
+    emb_matrix = np.zeros((len(unique_ids), emb_dim))
+    for fold_embs in emb_dicts:
+        for i, uid in enumerate(unique_ids):
+            if str(uid) in fold_embs:
+                emb_matrix[i] += fold_embs[str(uid)]
+    emb_matrix /= len(emb_dicts)
+    emb_cols = [f"gnn_emb_{i}" for i in range(emb_dim)]
+    result_df = pd.DataFrame(emb_matrix, columns=emb_cols)
+    result_df["id"] = unique_ids
+    return result_df
+
+
 def build_features(config_path: str = "config.yaml") -> None:
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
@@ -166,6 +206,19 @@ def build_features(config_path: str = "config.yaml") -> None:
     advanced_df = pd.DataFrame(advanced_features)
     print(f"  Added {advanced_df.shape[1]} advanced polymer features")
 
+    # Load GNN embeddings if available
+    exp_ver = cfg.get("experiment", {}).get("version", "v1")
+    gnn_emb_df = load_gnn_embeddings(exp_ver, "tg", cfg["cv"]["n_folds"], train["id"].tolist())
+    if not gnn_emb_df.empty:
+        id_to_canon = dict(zip(train["id"].astype(str), train["canon_smiles"]))
+        gnn_emb_df["canon_smiles"] = gnn_emb_df["id"].astype(str).map(id_to_canon)
+        gnn_emb_df = gnn_emb_df.dropna(subset=["canon_smiles"])
+        gnn_cols = [c for c in gnn_emb_df.columns if c not in ("id", "canon_smiles")]
+        gnn_emb_by_smiles = gnn_emb_df.set_index("canon_smiles").reindex(unique_smiles).fillna(0.0).reset_index(drop=True)
+        print(f"  Added {len(gnn_cols)} GNN embedding features")
+    else:
+        gnn_emb_by_smiles = None
+
     fp_dfs = {}
     for name, arr in fps.items():
         cols = [f"{name}_{i}" for i in range(arr.shape[1])]
@@ -184,7 +237,7 @@ def build_features(config_path: str = "config.yaml") -> None:
     del fps, desc, cust
     gc.collect()
 
-    cache_df = pd.concat(
+    concat_parts = (
         [pd.DataFrame({"canon_smiles": unique_smiles})]
         + [df.astype(np.float32) for df in fp_dfs.values()]
         + [desc_df.reset_index(drop=True).astype(np.float32)]
@@ -193,9 +246,11 @@ def build_features(config_path: str = "config.yaml") -> None:
         + [periodic_features.astype(np.float32)]
         + [advanced_df.astype(np.float32)]
         + [interactions_df.astype(np.float32)]
-        + [ratios_df.astype(np.float32)],
-        axis=1,
+        + [ratios_df.astype(np.float32)]
     )
+    if gnn_emb_by_smiles is not None:
+        concat_parts.append(gnn_emb_by_smiles.astype(np.float32))
+    cache_df = pd.concat(concat_parts, axis=1)
 
     del fp_dfs, desc_df, cust_df, poly_df
     gc.collect()

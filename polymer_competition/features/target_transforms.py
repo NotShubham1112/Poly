@@ -114,6 +114,7 @@ def rank_gauss_transform(y: np.ndarray) -> Tuple[np.ndarray, Callable]:
     qt = QuantileTransformer(
         output_distribution='normal',
         n_quantiles=min(1000, len(y)),
+        random_state=42,
     )
     transformed = qt.fit_transform(y.reshape(-1, 1)).ravel()
 

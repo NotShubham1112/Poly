@@ -1,0 +1,12 @@
+model:
+  colsample_bytree: 0.791
+  learning_rate: 0.056
+  max_depth: 10
+  min_child_samples: 5
+  n_estimators: 800
+  num_leaves: 16
+  random_state: 42
+  reg_alpha: 0.322
+  reg_lambda: 0.82
+  subsample: 0.821
+  verbosity: -1

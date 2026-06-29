@@ -41,6 +41,28 @@ def huber_loss(pred: torch.Tensor, target: torch.Tensor, delta: float = 1.0) -> 
     return nn.functional.huber_loss(pred, target, delta=delta)
 
 
+def extract_and_save_gnn_embeddings(model, val_loader, test_loader, val_ids, test_ids, fold, exp_ver, target, device):
+    from pathlib import Path
+    model.eval()
+    val_embeddings = {}
+    test_embeddings = {}
+    with torch.no_grad():
+        for batch, id_batch in zip(val_loader, val_ids):
+            batch = batch.to(device)
+            emb = model.get_embedding(batch)
+            for i, g_id in enumerate(id_batch):
+                val_embeddings[str(g_id)] = emb[i].cpu().numpy()
+        for batch, id_batch in zip(test_loader, test_ids):
+            batch = batch.to(device)
+            emb = model.get_embedding(batch)
+            for i, g_id in enumerate(id_batch):
+                test_embeddings[str(g_id)] = emb[i].cpu().numpy()
+    out_dir = Path(f"features/embeddings/{exp_ver}_{target}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    np.save(out_dir / f"fold{fold}_val.npy", val_embeddings)
+    np.save(out_dir / f"fold{fold}_test.npy", test_embeddings)
+
+
 # ----------------------------------------------------------------------------
 # Optuna hyperparameter tuning (used by run_tree_models.py)
 # ----------------------------------------------------------------------------
@@ -1396,10 +1418,13 @@ def main():
         from features.graphs import smiles_to_graph
         train_graphs = [smiles_to_graph(s, y=y) for s, y in
                         zip(tr_df["SMILES"].tolist(), tr_df[target_col].tolist())]
-        val_graphs = [smiles_to_graph(s, y=y) for s, y in
-                      zip(va_df["SMILES"].tolist(), va_df[target_col].tolist())]
         train_graphs = [g for g in train_graphs if g is not None]
-        val_graphs = [g for g in val_graphs if g is not None]
+        val_graphs = []
+        for s, y, gid in zip(va_df["SMILES"].tolist(), va_df[target_col].tolist(), va_df["id"].tolist()):
+            g = smiles_to_graph(s, y=y)
+            if g is not None:
+                g.id = gid
+                val_graphs.append(g)
 
         in_dim = train_graphs[0].x.size(1)
         edge_dim = train_graphs[0].edge_attr.size(1)
@@ -1437,6 +1462,22 @@ def main():
                 preds.append(pred.cpu().numpy())
                 gts.append(batch.y.view(-1).cpu().numpy())
         pred_va = np.concatenate(preds)
+        # Extract GNN embeddings for the feature pipeline
+        if args.target:
+            from features.graphs import smiles_to_graph as stg
+            from pathlib import Path
+            test_ids_for_emb = pd.read_csv(data_dir / args.target / "test.csv")["id"].tolist()
+            test_feat_emb = pd.read_parquet(data_dir / "processed" / "features_test.parquet")
+            test_graphs_emb = []
+            for s, gid in zip(test_feat_emb["SMILES"].tolist(), test_feat_emb["id"].tolist()):
+                g = stg(s)
+                if g is not None:
+                    test_graphs_emb.append(g)
+            PyGDL = PyGDataLoader if PyGDataLoader is not None else DataLoader
+            test_loader_emb = PyGDL(test_graphs_emb, batch_size=64, shuffle=False)
+            val_ids_batched = [va_df["id"].tolist()[i:i+64] for i in range(0, len(va_df), 64)]
+            test_ids_batched = [test_ids_for_emb[i:i+64] for i in range(0, len(test_ids_for_emb), 64)]
+            extract_and_save_gnn_embeddings(model, val_loader, test_loader_emb, val_ids_batched, test_ids_batched, args.fold, exp_ver, args.target, device)
         ckpt_tag = f"{exp_ver}_{target}_{args.model_type}_fold{args.fold}"
 
     # Metrics
@@ -1464,7 +1505,10 @@ def main():
 
     # Record run in experiment manifest
     from experiments.manifest import record_run
-    ckpt_path = ckpt_dir / f"{ckpt_tag}_best.pt"
+    if args.model_type == "mlp" and n_seeds > 1:
+        ckpt_path = ckpt_dir / f"{ckpt_tag}_seed0_best.pt"
+    else:
+        ckpt_path = ckpt_dir / f"{ckpt_tag}_best.pt"
     record_run(
         experiment=exp_ver,
         target=target,
