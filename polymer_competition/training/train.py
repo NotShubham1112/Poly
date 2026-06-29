@@ -36,6 +36,11 @@ from .train_utils import (
 from sklearn.preprocessing import StandardScaler
 
 
+def huber_loss(pred: torch.Tensor, target: torch.Tensor, delta: float = 1.0) -> torch.Tensor:
+    """Huber loss wrapper."""
+    return nn.functional.huber_loss(pred, target, delta=delta)
+
+
 # ----------------------------------------------------------------------------
 # Optuna hyperparameter tuning (used by run_tree_models.py)
 # ----------------------------------------------------------------------------
@@ -678,47 +683,63 @@ def train_model(model_type, config, fold=0, target="tg", **kwargs):
         X_tr = scaler.fit_transform(X_tr).astype(np.float32)
         X_va = scaler.transform(X_va).astype(np.float32)
 
-        model = FingerprintMLP(in_dim=X_tr.shape[1]).to(device)
-        opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-5)
-        sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=100)
-        crit = nn.MSELoss()
+        n_seeds = kwargs.get("n_seeds", 1)
+        base_seed = cfg.get("seed", {}).get("global", 42)
 
-        best_val_rmse = float("inf")
-        best_state = None
-        patience = 20
-        bad = 0
+        if kwargs.get("loss", "mse") == "huber":
+            crit = nn.HuberLoss(delta=1.0)
+        else:
+            crit = nn.MSELoss()
 
-        for ep in range(1, 101):
-            model.train()
-            idx = np.random.permutation(len(X_tr))
-            for i in range(0, len(X_tr), 64):
-                b = idx[i:i+64]
-                xb = torch.from_numpy(X_tr[b]).to(device)
-                yb = torch.from_numpy(y_tr[b]).to(device)
-                opt.zero_grad()
-                loss = crit(model(xb).squeeze(-1), yb)
-                loss.backward()
-                opt.step()
-            sched.step()
+        all_pred_va = []
 
+        for s in range(n_seeds):
+            set_seed(base_seed + s)
+
+            model = FingerprintMLP(in_dim=X_tr.shape[1]).to(device)
+            opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-5)
+            sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=100)
+
+            best_val_rmse = float("inf")
+            best_state = None
+            patience = 20
+            bad = 0
+
+            for ep in range(1, 101):
+                model.train()
+                idx = np.random.permutation(len(X_tr))
+                for i in range(0, len(X_tr), 64):
+                    b = idx[i:i+64]
+                    xb = torch.from_numpy(X_tr[b]).to(device)
+                    yb = torch.from_numpy(y_tr[b]).to(device)
+                    opt.zero_grad()
+                    loss = crit(model(xb).squeeze(-1), yb)
+                    loss.backward()
+                    opt.step()
+                sched.step()
+
+                model.eval()
+                with torch.no_grad():
+                    pred_va = model(torch.from_numpy(X_va).to(device)).squeeze(-1).cpu().numpy()
+                val_rmse = float(np.sqrt(np.mean((y_va - pred_va) ** 2)))
+                if val_rmse < best_val_rmse:
+                    best_val_rmse = val_rmse
+                    best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+                    bad = 0
+                else:
+                    bad += 1
+                    if bad >= patience:
+                        break
+
+            if best_state is not None:
+                model.load_state_dict(best_state)
             model.eval()
             with torch.no_grad():
                 pred_va = model(torch.from_numpy(X_va).to(device)).squeeze(-1).cpu().numpy()
-            val_rmse = float(np.sqrt(np.mean((y_va - pred_va) ** 2)))
-            if val_rmse < best_val_rmse:
-                best_val_rmse = val_rmse
-                best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
-                bad = 0
-            else:
-                bad += 1
-                if bad >= patience:
-                    break
 
-        if best_state is not None:
-            model.load_state_dict(best_state)
-        model.eval()
-        with torch.no_grad():
-            pred_va = model(torch.from_numpy(X_va).to(device)).squeeze(-1).cpu().numpy()
+            all_pred_va.append(pred_va)
+
+        pred_va = np.mean(all_pred_va, axis=0)
 
         metrics = {
             "rmse": rmse(y_va, pred_va),
@@ -963,6 +984,10 @@ def main():
                              "uncertainty weighting. Writes OOF for both targets.")
     parser.add_argument("--skip_inference", action="store_true",
                         help="Skip test inference after training.")
+    parser.add_argument("--n_seeds", type=int, default=1,
+                        help="Number of MLP seeds to train and ensemble (default: 1).")
+    parser.add_argument("--loss", type=str, default="mse", choices=["mse", "huber"],
+                        help="Loss function for neural models.")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -1101,6 +1126,8 @@ def main():
     feature_cols = [c for c in train.columns
                     if c not in ("SMILES", "id", "canon_smiles", "target_type", target_col)]
     scaler = None
+    n_seeds = args.n_seeds if args.model_type in ("mlp",) else 1
+    seed_tag = f"{n_seeds}seed_" if n_seeds > 1 else ""
 
     # Apply target transform
     y_tr_raw = tr_df[target_col].values
@@ -1180,69 +1207,110 @@ def main():
         X_tr = scaler.fit_transform(X_tr).astype(np.float32)
         X_va = scaler.transform(X_va).astype(np.float32)
 
-        model = FingerprintMLP(in_dim=X_tr.shape[1])
-        model = model.to(device)
-        opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-5)
-        sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=100)
-        crit = nn.MSELoss()
+        base_seed = cfg.get("seed", {}).get("global", 42)
+        n_seeds = args.n_seeds
+        seed_tag = f"{n_seeds}seed_" if n_seeds > 1 else ""
+        ckpt_tag = f"{exp_ver}_{target}_mlp_{seed_tag}fold{args.fold}"
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-        best_val_rmse = float("inf")
-        best_state = None
-        patience = 20
-        bad = 0
+        if args.loss == "huber":
+            crit = nn.HuberLoss(delta=1.0)
+        else:
+            crit = nn.MSELoss()
 
-        for ep in range(1, 101):
-            model.train()
-            idx = np.random.permutation(len(X_tr))
-            for i in range(0, len(X_tr), 64):
-                b = idx[i:i+64]
-                xb = torch.from_numpy(X_tr[b]).to(device)
-                yb = torch.from_numpy(y_tr[b]).to(device)
-                opt.zero_grad()
-                pred = model(xb).squeeze(-1)
-                loss = crit(pred, yb)
-                loss.backward()
-                opt.step()
-            sched.step()
+        all_pred_va = []
+        mlp_seed_state_dicts = []
 
-            # Validation
+        for s in range(n_seeds):
+            set_seed(base_seed + s)
+
+            model = FingerprintMLP(in_dim=X_tr.shape[1]).to(device)
+            opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-5)
+            sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=100)
+
+            best_val_rmse = float("inf")
+            best_state = None
+            patience = 20
+            bad = 0
+
+            for ep in range(1, 101):
+                model.train()
+                idx = np.random.permutation(len(X_tr))
+                for i in range(0, len(X_tr), 64):
+                    b = idx[i:i+64]
+                    xb = torch.from_numpy(X_tr[b]).to(device)
+                    yb = torch.from_numpy(y_tr[b]).to(device)
+                    opt.zero_grad()
+                    pred = model(xb).squeeze(-1)
+                    loss = crit(pred, yb)
+                    loss.backward()
+                    opt.step()
+                sched.step()
+
+                # Validation
+                model.eval()
+                with torch.no_grad():
+                    pred_va = model(torch.from_numpy(X_va).to(device)).squeeze(-1).cpu().numpy()
+                val_rmse = float(np.sqrt(np.mean((y_va - pred_va) ** 2)))
+                if val_rmse < best_val_rmse:
+                    best_val_rmse = val_rmse
+                    best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+                    bad = 0
+                else:
+                    bad += 1
+                    if bad >= patience:
+                        break
+
+            if best_state is not None:
+                model.load_state_dict(best_state)
             model.eval()
             with torch.no_grad():
                 pred_va = model(torch.from_numpy(X_va).to(device)).squeeze(-1).cpu().numpy()
-            val_rmse = float(np.sqrt(np.mean((y_va - pred_va) ** 2)))
-            if val_rmse < best_val_rmse:
-                best_val_rmse = val_rmse
-                best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
-                bad = 0
-            else:
-                bad += 1
-                if bad >= patience:
-                    break
 
-        if best_state is not None:
-            model.load_state_dict(best_state)
-        model.eval()
-        with torch.no_grad():
-            pred_va = model(torch.from_numpy(X_va).to(device)).squeeze(-1).cpu().numpy()
+            all_pred_va.append(pred_va)
+            mlp_seed_state_dicts.append(
+                best_state if best_state is not None else model.state_dict()
+            )
 
-        # Save MLP checkpoint
-        ckpt_dir.mkdir(parents=True, exist_ok=True)
-        ckpt_tag = f"{exp_ver}_{target}_{args.model_type}_fold{args.fold}"
-        best_path = ckpt_dir / f"{ckpt_tag}_best.pt"
-        final_path = ckpt_dir / f"{ckpt_tag}_final.pt"
-        ckpt_payload = {
-            "model_state": model.state_dict(),
-            "model_type": args.model_type,
-            "fold": args.fold,
-            "epoch": ep,
-            "val_rmse": best_val_rmse,
-            "config": {"in_dim": X_tr.shape[1], "out_dim": 1, **model_cfg},
-            "scaler_mean": scaler.mean_.tolist(),
-            "scaler_scale": scaler.scale_.tolist(),
-        }
-        save_checkpoint(ckpt_payload, best_path)
-        save_checkpoint(ckpt_payload, final_path)
-        print(f"  Checkpoint saved -> {best_path}")
+        # Average predictions across seeds
+        pred_va = np.mean(all_pred_va, axis=0)
+
+        # Save checkpoint(s)
+        if n_seeds > 1:
+            for s, sd in enumerate(mlp_seed_state_dicts):
+                seed_ckpt_tag = f"{ckpt_tag}_seed{s}"
+                sp = ckpt_dir / f"{seed_ckpt_tag}_best.pt"
+                fp = ckpt_dir / f"{seed_ckpt_tag}_final.pt"
+                payload = {
+                    "model_state": sd,
+                    "model_type": args.model_type,
+                    "fold": args.fold,
+                    "seed_offset": s,
+                    "epoch": ep,
+                    "val_rmse": best_val_rmse,
+                    "config": {"in_dim": X_tr.shape[1], "out_dim": 1, **model_cfg},
+                    "scaler_mean": scaler.mean_.tolist(),
+                    "scaler_scale": scaler.scale_.tolist(),
+                }
+                save_checkpoint(payload, sp)
+                save_checkpoint(payload, fp)
+            print(f"  Saved {n_seeds} seed checkpoints -> {ckpt_dir}/{ckpt_tag}_seed*")
+        else:
+            best_path = ckpt_dir / f"{ckpt_tag}_best.pt"
+            final_path = ckpt_dir / f"{ckpt_tag}_final.pt"
+            ckpt_payload = {
+                "model_state": mlp_seed_state_dicts[0],
+                "model_type": args.model_type,
+                "fold": args.fold,
+                "epoch": ep,
+                "val_rmse": best_val_rmse,
+                "config": {"in_dim": X_tr.shape[1], "out_dim": 1, **model_cfg},
+                "scaler_mean": scaler.mean_.tolist(),
+                "scaler_scale": scaler.scale_.tolist(),
+            }
+            save_checkpoint(ckpt_payload, best_path)
+            save_checkpoint(ckpt_payload, final_path)
+            print(f"  Checkpoint saved -> {best_path}")
     elif args.model_type == "polychain" or args.model_type.startswith("polychain_"):
         from features.graph_utils import build_multiscale
         from models.polychain.cst import compute_cst_batch
@@ -1387,7 +1455,7 @@ def main():
     # Save OOF predictions
     pred_dir = Path(cfg["paths"]["predictions_dir"])
     pred_dir.mkdir(parents=True, exist_ok=True)
-    out_file = pred_dir / f"{exp_ver}_{target}_{args.model_type}_fold{args.fold}.pkl"
+    out_file = pred_dir / f"{exp_ver}_{target}_{args.model_type}_{seed_tag}fold{args.fold}.pkl"
     with open(out_file, "wb") as f:
         pickle.dump({"val_idx": val_idx, "pred": pred_va, "y": y_va,
                      "metrics": metrics, "model_type": args.model_type,
@@ -1425,9 +1493,20 @@ def main():
         elif args.model_type in ("mlp",):
             if scaler is not None:
                 X_test = scaler.transform(X_test).astype(np.float32)
-            model.eval()
-            with torch.no_grad():
-                test_preds = model(torch.from_numpy(X_test).to(device)).squeeze(-1).cpu().numpy()
+            if n_seeds > 1:
+                test_preds_list = []
+                for s, sd in enumerate(mlp_seed_state_dicts):
+                    m = FingerprintMLP(in_dim=X_test.shape[1]).to(device)
+                    m.load_state_dict(sd)
+                    m.eval()
+                    with torch.no_grad():
+                        p = m(torch.from_numpy(X_test).to(device)).squeeze(-1).cpu().numpy()
+                    test_preds_list.append(p)
+                test_preds = np.mean(test_preds_list, axis=0)
+            else:
+                model.eval()
+                with torch.no_grad():
+                    test_preds = model(torch.from_numpy(X_test).to(device)).squeeze(-1).cpu().numpy()
         elif args.model_type == "polychain" or args.model_type.startswith("polychain_"):
             from features.graph_utils import build_multiscale
             from models.polychain.cst import compute_cst_batch
@@ -1466,7 +1545,7 @@ def main():
         if transform_name is not None:
             test_preds = inv_func(test_preds)
 
-        test_out = pred_dir / f"{exp_ver}_{target}_{args.model_type}_fold{args.fold}_test.pkl"
+        test_out = pred_dir / f"{exp_ver}_{target}_{args.model_type}_{seed_tag}fold{args.fold}_test.pkl"
         with open(test_out, "wb") as f:
             pickle.dump({
                 "id": test_feat["id"].values.tolist(),
