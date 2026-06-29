@@ -3973,5 +3973,35 @@
     "config_hash": "d7a5a2af7c09c418",
     "environment": "experiments\\environment.txt",
     "timestamp": "2026-06-29T10:29:27"
+  },
+  {
+    "experiment": "v28",
+    "target": "tg",
+    "model": "ridge",
+    "fold": 0,
+    "status": "completed",
+    "score": 0.4465920293080896,
+    "checkpoint": "outputs\\checkpoints\\v28_tg_ridge_fold0_best.pt",
+    "duration_sec": 0,
+    "seed": 42,
+    "git_commit": "ecd22194e01fa62649bfccbdd635bd50b0aa3941",
+    "config_hash": "d7a5a2af7c09c418",
+    "environment": "experiments\\environment.txt",
+    "timestamp": "2026-06-29T10:46:28"
+  },
+  {
+    "experiment": "v28",
+    "target": "tg",
+    "model": "ridge",
+    "fold": 0,
+    "status": "completed",
+    "score": 0.4465920293080896,
+    "checkpoint": "outputs\\checkpoints\\v28_tg_ridge_fold0_best.pt",
+    "duration_sec": 0,
+    "seed": 42,
+    "git_commit": "ecd22194e01fa62649bfccbdd635bd50b0aa3941",
+    "config_hash": "d7a5a2af7c09c418",
+    "environment": "experiments\\environment.txt",
+    "timestamp": "2026-06-29T10:46:55"
   }
 ]

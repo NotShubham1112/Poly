@@ -34,7 +34,7 @@ Poly/
 ## Model Types Available
 `ridge`, `xgb`, `lgb`, `catboost`, `rf`, `mlp`, `gcn`, `gat`, `mpnn`, `graph_transformer`, `polychain`
 
-## Training Status (v27)
+## Training Status (v29 — merged to main)
 | Model | TG 5-fold | EGC 5-fold | Mean R² (TG) | Mean R² (EGC) |
 |-------|-----------|------------|---------------|----------------|
 | xgb | DONE | DONE | ~0.859 | ~0.906 |
@@ -42,6 +42,7 @@ Poly/
 | catboost | DONE | DONE | ~0.852 | ~0.902 |
 | rf | DONE | DONE | ~0.835 | ~0.881 |
 | mlp | DONE | DONE | ~0.849 | ~0.881 |
+| mlp (multi-seed) | NOT RETRAINED | NOT RETRAINED | — | — |
 | gcn | DONE | DONE | ~0.684 | ~0.722 |
 | gat | DONE | DONE | ~0.706 | ~0.701 |
 | mpnn | DONE | DONE | ~0.668 | ~0.796 |
@@ -52,12 +53,33 @@ Poly/
 Ensemble: 8-model weighted average (xgb, lgb, catboost, rf, mlp, gcn, gat, mpnn)
 Submission: `outputs/submissions/submission.csv` (4115 rows)
 
+## v29 Improvements (merged Jun 29)
+1. **Target transforms**: Yeo-Johnson + RankGauss in `features/target_transforms.py`, auto-selected via `select_best_transform()`
+2. **Topological graph invariants**: 16 RDKit descriptors (BalabanJ, BertzCT, Chi0-4n/v, Kappa1-3, HallKierAlpha) in `features/advanced_descriptors.py`
+3. **GNN get_embedding()**: GCN/GAT/DMPNN return pooled graph embeddings via `model.get_embedding(data)` in `models/gnn.py`
+4. **Multi-seed MLP ensemble**: `--n_seeds 5` and `--loss huber` args in `training/train.py`, per-seed checkpoints
+5. **GNN embeddings as features**: Wired into `features/build_features.py` via `load_gnn_embeddings()` with SMILES-space mapping
+6. **Multi-task learning**: `run_multitask.py` with uncertainty-weighted masking, dual-output head
+7. **Level-2 stacking**: `ensemble/weight_optimizer.py` with diverse meta-learners (Ridge, Lasso, RF, XGB)
+8. **Preprocessing pipeline**: `features/preprocessing.py` with zero-variance removal, NaN/Inf handling, correlation filter, MI-based selection
+
 ## Training Commands
 - Full pipeline: `cd polymer_competition && python generate_all.py`
 - Single model: `python -m training.train --model_type xgb --fold 0`
+- Target-specific training: `python -m training.train --model_type mlp --fold 0 --target tg`
+- Multi-seed MLP: `python -m training.train --model_type mlp --fold 0 --target tg --n_seeds 5 --loss huber`
 - All folds: `python -m training.run_all_folds --models ridge,xgb,gcn,polychain`
+- GNN embedding extraction: auto-runs when `--target` is set during GNN training
+- Multi-task training: `python run_multitask.py --epochs 80`
+- Submission: `python run_submission.py`
 - Ablation: `python -m training.run_ablation --fold 0 --epochs 50`
 - Ensemble: `python -m ensemble.build_ensemble --config config.yaml`
+- Tests: `python -m pytest tests/`
+- Tests (all but pre-existing failures): `python -m pytest tests/ --ignore=tests/test_ablate.py --ignore=tests/test_run_submission.py`
+
+## TO-DO (next session)
+- Run full pipeline with v29 features: rebuild feature cache, retrain all models 5-fold, run 80-epoch multi-task, build ensemble + submit
+- Target Kaggle notebook with GPU for full pipeline execution
 
 ## Evaluation Metric
 **Mean R²** = (R²_Tg + R²_Egc) / 2. Submission format: CSV with `id` and `target` columns.
