@@ -5,9 +5,11 @@ import gc
 import hashlib
 import pickle
 import subprocess
+import warnings
 from pathlib import Path
 
 import numpy as np
+warnings.filterwarnings("ignore", "overflow encountered", module="pandas")
 import pandas as pd
 import yaml
 from rdkit import Chem
@@ -49,7 +51,8 @@ def load_and_normalize(csv_path: Path) -> pd.DataFrame:
 
 def get_git_commit() -> str:
     try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+        return subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                       text=True, stderr=subprocess.DEVNULL).strip()
     except Exception:
         return "unknown"
 
