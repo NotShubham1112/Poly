@@ -3,6 +3,8 @@
 import numpy as np
 from typing import Tuple, Callable
 from scipy import stats
+from scipy.stats import skew as skewness
+from sklearn.preprocessing import PowerTransformer, QuantileTransformer
 
 
 def boxcox_transform(y: np.ndarray) -> Tuple[np.ndarray, Callable]:
@@ -54,8 +56,6 @@ def quantile_transform(y: np.ndarray) -> Tuple[np.ndarray, Callable]:
     Returns:
         Tuple of (transformed_values, inverse_function)
     """
-    from sklearn.preprocessing import QuantileTransformer
-
     qt = QuantileTransformer(
         output_distribution='normal',
         n_quantiles=min(100, len(y)),
@@ -100,6 +100,29 @@ def log_transform(y: np.ndarray) -> Tuple[np.ndarray, Callable]:
     return y_transformed, inverse_transform
 
 
+def yeo_johnson_transform(y: np.ndarray) -> Tuple[np.ndarray, Callable]:
+    pt = PowerTransformer(method='yeo-johnson', standardize=False)
+    transformed = pt.fit_transform(y.reshape(-1, 1)).ravel()
+
+    def inverse_fn(y_pred):
+        return pt.inverse_transform(y_pred.reshape(-1, 1)).ravel()
+
+    return transformed, inverse_fn
+
+
+def rank_gauss_transform(y: np.ndarray) -> Tuple[np.ndarray, Callable]:
+    qt = QuantileTransformer(
+        output_distribution='normal',
+        n_quantiles=min(1000, len(y)),
+    )
+    transformed = qt.fit_transform(y.reshape(-1, 1)).ravel()
+
+    def inverse_fn(y_pred):
+        return qt.inverse_transform(y_pred.reshape(-1, 1)).ravel()
+
+    return transformed, inverse_fn
+
+
 def select_best_transform(y: np.ndarray) -> Tuple[np.ndarray, Callable, str]:
     """
     Select best transformation based on distribution.
@@ -110,18 +133,29 @@ def select_best_transform(y: np.ndarray) -> Tuple[np.ndarray, Callable, str]:
     Returns:
         Tuple of (transformed_values, inverse_function, transform_name)
     """
-    skewness = abs(stats.skew(y))
+    skew = abs(skewness(y))
 
-    if skewness > 2:
-        if y.min() > 0:
-            y_trans, inv_func = log_transform(y)
-            return y_trans, inv_func, "log"
-        else:
-            y_trans, inv_func = boxcox_transform(y)
-            return y_trans, inv_func, "boxcox"
-    elif skewness > 1:
-        y_trans, inv_func = boxcox_transform(y)
-        return y_trans, inv_func, "boxcox"
+    if skew > 2.0:
+        candidates = [
+            ("log", log_transform),
+            ("boxcox", boxcox_transform),
+            ("yeo_johnson", yeo_johnson_transform),
+        ]
+    elif skew > 1.0:
+        candidates = [
+            ("boxcox", boxcox_transform),
+            ("yeo_johnson", yeo_johnson_transform),
+        ]
     else:
         y_trans, inv_func = quantile_transform(y)
         return y_trans, inv_func, "quantile"
+
+    best = min(
+        (
+            (name, abs(skewness(t)), t, inv)
+            for name, fn in candidates
+            for t, inv in [fn(y)]
+        ),
+        key=lambda x: x[1],
+    )
+    return best[2], best[3], best[0]

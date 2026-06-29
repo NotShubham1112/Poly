@@ -4,6 +4,8 @@ from features.target_transforms import (
     boxcox_transform,
     quantile_transform,
     log_transform,
+    yeo_johnson_transform,
+    rank_gauss_transform,
     select_best_transform,
 )
 from training.train import apply_target_transform
@@ -37,6 +39,27 @@ def test_log_transform():
     # Inverse transform should recover original
     y_recovered = inv_func(y_transformed)
     np.testing.assert_array_almost_equal(y, y_recovered, decimal=5)
+
+
+def test_yeo_johnson_roundtrip():
+    y = np.random.randn(100) * 10 + 50
+    y_trans, inverse = yeo_johnson_transform(y)
+    y_back = inverse(y_trans)
+    assert np.allclose(y, y_back, atol=1e-6)
+
+
+def test_rank_gauss_roundtrip():
+    y = np.random.randn(100) * 10 + 50
+    y_trans, inverse = rank_gauss_transform(y)
+    y_back = inverse(y_trans)
+    assert np.allclose(y, y_back, atol=1e-6)
+
+
+def test_select_best_includes_yeojohnson():
+    y = np.random.exponential(scale=10, size=200)
+    y_trans, inv_func, name = select_best_transform(y)
+    y_back = inv_func(y_trans)
+    assert np.allclose(y, y_back, atol=1e-6)
 
 
 # --- Tests for apply_target_transform ---
@@ -87,6 +110,6 @@ def test_apply_target_transform_empty_dict():
 def test_select_best_transform_returns_inverse():
     y = np.array([100.0, 150.0, 200.0, 250.0, 300.0, 350.0, 400.0])
     y_t, inv, name = select_best_transform(y)
-    assert name in ('boxcox', 'quantile', 'log')
+    assert name in ('boxcox', 'quantile', 'log', 'yeo_johnson')
     assert callable(inv)
     assert y_t.shape == y.shape
