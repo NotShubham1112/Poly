@@ -208,8 +208,9 @@ def build_features(config_path: str = "config.yaml") -> None:
 
     # Load GNN embeddings if available
     exp_ver = cfg.get("experiment", {}).get("version", "v1")
-    gnn_emb_df = load_gnn_embeddings(exp_ver, "tg", cfg["cv"]["n_folds"], train["id"].tolist())
-    if not gnn_emb_df.empty:
+    all_ids = train["id"].tolist() if "id" in train.columns else list(range(len(train)))
+    gnn_emb_df = load_gnn_embeddings(exp_ver, "tg", cfg["cv"]["n_folds"], all_ids)
+    if not gnn_emb_df.empty and "id" in train.columns:
         id_to_canon = dict(zip(train["id"].astype(str), train["canon_smiles"]))
         gnn_emb_df["canon_smiles"] = gnn_emb_df["id"].astype(str).map(id_to_canon)
         gnn_emb_df = gnn_emb_df.dropna(subset=["canon_smiles"])

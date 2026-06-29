@@ -1112,7 +1112,7 @@ def main():
         train = train[train["target_type"] == target].reset_index(drop=True)
         splits_path = data_dir / f"splits_{target}.pkl"
     else:
-        train = pd.read_parquet(data_dir / "processed" / "train_features.parquet")
+        train = pd.read_parquet(data_dir / "processed" / "features_train.parquet")
         splits_path = data_dir / "splits.pkl"
 
     try:
