@@ -42,7 +42,6 @@ def huber_loss(pred: torch.Tensor, target: torch.Tensor, delta: float = 1.0) -> 
 
 
 def extract_and_save_gnn_embeddings(model, val_loader, test_loader, val_ids, test_ids, fold, exp_ver, target, device):
-    from pathlib import Path
     model.eval()
     val_embeddings = {}
     test_embeddings = {}
@@ -1465,7 +1464,6 @@ def main():
         # Extract GNN embeddings for the feature pipeline
         if args.target:
             from features.graphs import smiles_to_graph as stg
-            from pathlib import Path
             test_ids_for_emb = pd.read_csv(data_dir / args.target / "test.csv")["id"].tolist()
             test_feat_emb = pd.read_parquet(data_dir / "processed" / "features_test.parquet")
             test_graphs_emb = []
