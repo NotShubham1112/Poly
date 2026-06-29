@@ -34,6 +34,24 @@ Poly/
 ## Model Types Available
 `ridge`, `xgb`, `lgb`, `catboost`, `rf`, `mlp`, `gcn`, `gat`, `mpnn`, `graph_transformer`, `polychain`
 
+## Training Status (v27)
+| Model | TG 5-fold | EGC 5-fold | Mean R² (TG) | Mean R² (EGC) |
+|-------|-----------|------------|---------------|----------------|
+| xgb | DONE | DONE | ~0.859 | ~0.906 |
+| lgb | DONE | DONE | ~0.860 | ~0.899 |
+| catboost | DONE | DONE | ~0.852 | ~0.902 |
+| rf | DONE | DONE | ~0.835 | ~0.881 |
+| mlp | DONE | DONE | ~0.849 | ~0.881 |
+| gcn | DONE | DONE | ~0.684 | ~0.722 |
+| gat | DONE | DONE | ~0.706 | ~0.701 |
+| mpnn | DONE | DONE | ~0.668 | ~0.796 |
+| polychain | 1/5 (TG only) | 0/5 | ~0.847 (1 fold) | N/A |
+| ridge | SKIPPED | SKIPPED | -0.019 (useless) | N/A |
+| graph_transformer | NOT TRAINED | NOT TRAINED | N/A | N/A |
+
+Ensemble: 8-model weighted average (xgb, lgb, catboost, rf, mlp, gcn, gat, mpnn)
+Submission: `outputs/submissions/submission.csv` (4115 rows)
+
 ## Training Commands
 - Full pipeline: `cd polymer_competition && python generate_all.py`
 - Single model: `python -m training.train --model_type xgb --fold 0`

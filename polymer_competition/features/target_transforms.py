@@ -1,0 +1,162 @@
+"""Target transformations for improved model performance."""
+
+import numpy as np
+from typing import Tuple, Callable
+from scipy import stats
+from scipy.stats import skew as skewness
+from sklearn.preprocessing import PowerTransformer, QuantileTransformer
+
+
+def boxcox_transform(y: np.ndarray) -> Tuple[np.ndarray, Callable]:
+    """
+    Apply Box-Cox transformation to target.
+
+    Useful for:
+    - Making distribution more normal
+    - Stabilizing variance
+    - Improving linear model performance
+
+    Args:
+        y: Raw target values (must be positive)
+
+    Returns:
+        Tuple of (transformed_values, inverse_function)
+    """
+    min_val = y.min()
+    if min_val <= 0:
+        y_shifted = y - min_val + 1
+    else:
+        y_shifted = y
+        min_val = 0
+
+    y_transformed, lambda_param = stats.boxcox(y_shifted)
+
+    def inverse_transform(y_trans):
+        if lambda_param == 0:
+            y_inv = np.exp(y_trans)
+        else:
+            y_inv = (y_trans * lambda_param + 1) ** (1 / lambda_param)
+        return y_inv + min_val
+
+    return y_transformed, inverse_transform
+
+
+def quantile_transform(y: np.ndarray) -> Tuple[np.ndarray, Callable]:
+    """
+    Apply quantile transformation (rank-based) to target.
+
+    Useful for:
+    - Making distribution exactly normal
+    - Handling outliers
+    - Tree models sometimes benefit
+
+    Args:
+        y: Raw target values
+
+    Returns:
+        Tuple of (transformed_values, inverse_function)
+    """
+    qt = QuantileTransformer(
+        output_distribution='normal',
+        n_quantiles=min(100, len(y)),
+        random_state=42
+    )
+
+    y_reshaped = y.reshape(-1, 1)
+    y_transformed = qt.fit_transform(y_reshaped).flatten()
+
+    def inverse_transform(y_trans):
+        return qt.inverse_transform(y_trans.reshape(-1, 1)).flatten()
+
+    return y_transformed, inverse_transform
+
+
+def log_transform(y: np.ndarray) -> Tuple[np.ndarray, Callable]:
+    """
+    Apply log transformation to target.
+
+    Useful for:
+    - Skewed distributions
+    - Egc values (typically 0.1-10)
+    - Ratios and percentages
+
+    Args:
+        y: Raw target values (must be positive)
+
+    Returns:
+        Tuple of (transformed_values, inverse_function)
+    """
+    shift = 0.0
+    min_val = y.min()
+    if min_val <= 0:
+        shift = -min_val + 0.001
+    y_shifted = y + shift
+
+    y_transformed = np.log(y_shifted)
+
+    def inverse_transform(y_trans):
+        return np.exp(y_trans) - shift
+
+    return y_transformed, inverse_transform
+
+
+def yeo_johnson_transform(y: np.ndarray) -> Tuple[np.ndarray, Callable]:
+    pt = PowerTransformer(method='yeo-johnson', standardize=False)
+    transformed = pt.fit_transform(y.reshape(-1, 1)).ravel()
+
+    def inverse_fn(y_pred):
+        return pt.inverse_transform(y_pred.reshape(-1, 1)).ravel()
+
+    return transformed, inverse_fn
+
+
+def rank_gauss_transform(y: np.ndarray) -> Tuple[np.ndarray, Callable]:
+    qt = QuantileTransformer(
+        output_distribution='normal',
+        n_quantiles=min(1000, len(y)),
+        random_state=42,
+    )
+    transformed = qt.fit_transform(y.reshape(-1, 1)).ravel()
+
+    def inverse_fn(y_pred):
+        return qt.inverse_transform(y_pred.reshape(-1, 1)).ravel()
+
+    return transformed, inverse_fn
+
+
+def select_best_transform(y: np.ndarray) -> Tuple[np.ndarray, Callable, str]:
+    """
+    Select best transformation based on distribution.
+
+    Args:
+        y: Raw target values
+
+    Returns:
+        Tuple of (transformed_values, inverse_function, transform_name)
+    """
+    skew = abs(skewness(y))
+
+    if skew > 2.0:
+        candidates = [
+            ("log", log_transform),
+            ("boxcox", boxcox_transform),
+            ("yeo_johnson", yeo_johnson_transform),
+        ]
+    elif skew > 1.0:
+        candidates = [
+            ("boxcox", boxcox_transform),
+            ("yeo_johnson", yeo_johnson_transform),
+        ]
+    else:
+        y_trans, inv_func = quantile_transform(y)
+        return y_trans, inv_func, "quantile"
+
+    best = min(
+        (
+            (name, abs(skewness(t)), t, inv)
+            for name, fn in candidates
+            for t, inv in [fn(y)]
+        ),
+        key=lambda x: x[1],
+    )
+    return best[2], best[3], best[0]

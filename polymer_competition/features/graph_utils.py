@@ -55,7 +55,7 @@ def build_multiscale(smiles: str, y: Optional[float] = None) -> Optional[MultiSc
         return None
     di = kmer_graph(smiles, k=2, y=y) or mono
     tri = kmer_graph(smiles, k=3, y=y) or mono
-    per = periodic_graph(smiles, k=1, y=y) or mono
+    per = periodic_graph(smiles, y=y) or mono
     return MultiScaleSample(mono, di, tri, per, smiles, y)
 
 

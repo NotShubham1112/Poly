@@ -1,0 +1,1066 @@
+--- PAGE 1 ---
+npj | computational materials Article
+Published in partnership with the Shanghai Institute of Ceramics of the Chinese Academy of Sciences
+https://doi.org/10.1038/s41524-025-01652-z
+Uniﬁed multimodal multidomain polymer
+representation for property prediction
+Check for updates
+Qi Huang1,2,3,4, Yedi Li1,4, Lei Zhu1 , Qibin Zhao3 &W e n j i eY u1
+Polymer property prediction is a critical task in polymer science. Conventional approaches typically
+rely on a single data modality or a limited set of modalities, which constrains both predictive accuracy
+and practical applicability. In this paper, we present Uni-Poly, a novel framework that integrates
+diverse data modalities to achieve a comprehensive and uni ﬁed representation of polymers. Uni-Poly
+encompasses all commonly used structural formats, including SMILES, 2D graphs, 3D geometries,
+and ﬁngerprints. In addition, it incorporates domain-speci ﬁc textual descriptions to enrich the
+representation. Experimental results demonstrate that Uni-Poly outperforms all single-modality and
+multi-modality baselines across various property prediction tasks. The integration of textual
+descriptions provides complementary information that structural representations alone cannot
+capture. These ﬁndings underscore the value of leveraging multimodal and domain-speci ﬁc
+information to enhance polymer property prediction, thereby advancing high-throughput screening
+and the discovery of novel polymer materials.
+Polymer materials are essential to a wide range of applications, from
+packaging and construction to advanced biomedical devices, due to their
+versatility and tunable properties1–5. A comprehensive understanding of the
+complex relationships between polymer structures and their properties is
+vital for the rational design of materials tailored to speci ﬁc applications.
+While traditional experimental and computational methods have been
+employed to study these structure –property relationships, they are often
+time-consuming and resource-intensive because of the immense diversity
+within the polymer chemical space. Recently, machine learning (ML)
+models have emerged as powerful tools for uncovering polymer
+structure–property relationships, demonstrating remarkable success. These
+ML-based strategies necessitate the development of effective and robust
+representations of polymer structures to ensure accurate predictions and
+meaningful insights. Early methods utilized molecularﬁngerprints
+6–9,w h i c h
+encode structural information into ﬁxed-length bit vectors. While these
+ﬁngerprints effectively capture polymer substructures, their ﬁxed format
+limits end-to-end learning capabilities. Advances in deep learning techni-
+ques have introduced learned representations, including those based on
+SMILES sequences
+10–16, graph-based representations17–25, and 3D geometric
+data26–31. Although these approaches have shown promising results, existing
+studies often have not considered on m ultimodal methods, limiting their
+ability to integrate the diverse and complementary information provided by
+different data types. This limitation typically restricts their effectiveness to
+speciﬁc properties, making it challenging to achieve general-purpose
+applicability. For example, a recent study by Zhu32 demonstrated that dif-
+ferent representation methods exhibit varying strengths depending on the
+target property: for 2D molecular structures, SMILES-based representations
+excel in predicting chirality, whereas graph-based representations outper-
+form others in capturing ring-related features. Theseﬁndings emphasize the
+modality-speciﬁc strengths and limitations of current approaches and
+highlight the need for a comprehensive framework capable of integrating
+multiple information sources into a uniﬁed and informative representation.
+Beyond molecular structures, recent advancements in language models
+have introduced an emerging representation method: text-based descrip-
+t i o n s .S t u d i e si nt h eﬁeld of small molecules have demonstrated that
+leveraging molecular-related captions, i.e., domain-speci ﬁck n o w l e d g e
+embedded in textual descriptions,can enhance the molecule modeling
+33–35.
+These captions provide contextual information that is often dif ﬁcult to
+encode using conventional molecular descriptors alone. However, applying
+textual knowledge to polymer science remains challenging due to the
+absence of consistent, large-scale, and high-quality datasets of polymer
+captions. The advent of large language models (LLMs) offers a promising
+solution to this issue. General-purpose LLMs, trained on extensive scientiﬁc
+corpora, implicitly store vast amo unts of domain knowledge. Recent
+works
+36,37 have successfully extracted domain-speciﬁc insights and material
+data from these models, showcasing their capacity to generate meaningful,
+1National Key Laboratory of Materials for Integrated Circuits, Shanghai Institute of Microsystem and Information Technology, Chinese Academy of Sc iences,
+Shanghai, China. 2College of Materials Science and Opto-Electronic Technology, University of Chinese Academy of Sciences, Shanghai, China.3RIKEN Center for
+Advanced Intelligence Project (RIKEN AIP), Tokyo, Japan. 4These authors contributed equally: Qi Huang, Yedi Li. e-mail: leizhu@mail.sim.ac.cn;
+qibin.zhao@riken.jp
+npj Computational Materials |          (2025) 11:153 1
+1234567890():,;
+1234567890():,;
+
+--- PAGE 2 ---
+context-rich captions for polyme rs. This advancement moves beyond
+purely structure-based predictions, enabling the integration of human-like
+domain reasoning into polymer modeling.
+This work introduces Uni-Poly, a novel uni ﬁed framework for gen-
+erating multimodal and multi-domain polymer representations. The pri-
+mary contributions of this work are as follows: (i) leveraging large language
+models and structured data, construct a dataset Poly-Caption that con-
+taining over 10,000 textual descriptions of polymers through knowledge-
+enhanced prompting; (ii) developi ng the Uni-Poly framework, which
+integrates multiple polymer data modalities — including SMILES, 2D
+molecular graphs, 3D molecular geometries, molecular ﬁngerprints, and
+textual descriptions— into a uni ﬁed representation. To the best of our
+knowledge, this is the ﬁrst framework to systematically integrate multi-
+modal and multi-domain information for polymers; and (iii) conducting a
+comprehensive evaluation of the Uni-Poly framework across a diverse set of
+polymer property prediction tasks. The results demonstrate Uni-Poly ’s
+superiority in predictive performance compared to existing single-modality
+and multimodal approaches, highlighting the effectiveness of combining
+diverse modalitiesand domain-speciﬁc textual knowledge, offering a more
+comprehensive approach to polymer informatics.
+Results
+Overall performance
+We compared the property prediction performance of Uni-Poly with other
+single- and multi-modality models. As shown in Table1, overall, the glass
+transition temperature (Tg) emerg ed as the best-predicted property,
+achieving anR² of ~0.9, highlighting the strong correlation between Tg and
+polymer structure. This was followed by thermal decomposition tempera-
+ture (Td) and density (De), with R² values ranging from 0.7 to 0.8. In
+contrast, properties like electrical resistivity (Er) and melting temperature
+(Tm) exhibited lowerR² values, typically between 0.4 and 0.6, reﬂecting the
+challenges of predicting these properties based solely on monomer unit
+structures.
+Among all evaluated models, Uni-Poly consistently outperformed all
+baselines across the evaluated properties, achieving at least a 1.1%
+improvement in R² over the best-performing baseline in various tasks.
+Notably, for Tm, Uni-Poly demonstrated a signiﬁcant 5.1% increase inR²,
+underscores the advantage of integrating complementary modalities, par-
+ticularly for challenging propert ies where structural data alone is
+insufﬁcient.
+Moreover, we observed that no single-modality model achieved opti-
+mal performance across all evaluation metrics. For single-modality models,
+Morgan excelled in predicting Td and Tm, ChemBERTa performed best for
+De and Tg, while Uni-mol achieved the highest R² for Er. This ﬁnding
+supports our earlier assertion that single-modality models are constrained
+by their limited representational capacity, making it challenging to excel
+across diverse tasks. In contrast, multimodal models generally exhibit
+superior representational capacity, leading to their outperformance of
+single-modality models in most tasks, showcasing the beneﬁts of leveraging
+multiple data modalities.
+Notably, the Text+Chem T5 model demonstrated the weakest overall
+performance, likely due to the challengesof capturing precise structural and
+physicochemical information through textual descriptions alone. Despite
+this limitation, the model achievedR² values exceeding 0.44 across all tasks
+and performed notably well in predicting Tg, achieving an R² of 0.745.
+Remarkably, for Tm, it outperformed SchNet, illustrating the rich infor-
+mational content of textual data— a resource often overlooked in polymer
+research.
+Although Uni-Poly achieves higheraccuracy than existing models in
+predicting polymer properties, its performance remains insuf ﬁcient for
+engineering applications. For instance, considering the glass transition
+temperature (Tg), the best-predicted property, the mean absolute error is
+approximately 22 °C, which still ex ceeds the error tolerance generally
+accepted in the industry. This limitation arises from two major constraints.
+First, differences in experimental measurement methods (e.g., variations in
+heating rates in DSC(Differential Scanning Calorimeter) tests could lead to
+differences in Tg exceeding 10 °C
+38) introduce inherent noise in the data,
+setting a theoretical limit on prediction accuracy that is difﬁcult to surpass.
+More importantly, current polymer representation in Uni-Poly lacks a
+multi-scale representation of polymer structures. Polymer properties are
+intrinsically determined by structural features spanning multiple scales,
+including monomer structure, molecular weight distribution, chain entan-
+glement, and aggregated structures. However, due to limitations in data
+availability, the current model extracts features solely from the monomer-
+level inputs. To overcome the accur acy bottlenecks, it is promising to
+incorporate multi-scale structural information into predictive models. For
+example, studies such as BigSMILES
+39, have extended polymer representa-
+tion by encoding monomer sequence information and have achieved certain
+improvements in prediction accuracy. Integrating such representations into
+U n i - P o l yh o l d sp o t e n t i a lf o rf u rther enhancing its performance.
+Poly-Caption and the impact of multi-domain input
+We ﬁrst examine the generated caption dataset, Poly-Caption. Figure 1
+illustrates the overall length distribution of the captions. The generated text
+lengths generally follow a Gaussian distribution, with most captions falling
+within the range of 90–135 words.
+Table 1 | A comparison of R² score across different models and properties
+De Er Td Tg Tm
+Single-modal Morgan 6 0.680 ± 0.037 0.506 ± 0.040 0.727 ± 0.018 0.885 ± 0.015 0.567 ± 0.066
+SMILES-BERT11 0.753 ± .029 0.515 ± 0.045 0.714 ± 0.022 0.892 ± 0.018 0.543 ± 0.049
+ChemBERTa14 0.794 ± 0.035 0.533 ± 0.062 0.708 ± 0.016 0.897 ± 0.014 0.520 ± 0.053
+GCN17 0.765 ± 0.042 0.520 ± 0.048 0.703 ± 0.019 0.874 ± 0.017 0.531 ± 0.059
+GIN19 0.761 ± 0.034 .500 ± 0.051 0.707 ± 0.014 0.886 ± 0.017 .536 ± .070
+SchNet26 0.733 ± 0.057 0.497 ± 0.053 0.609 ± 0.030 0.842 ± 0.031 0.468 ± 0.033
+Uni-mol31 0.771 ± 0.038 0.542 ± 0.050 0.719 ± 0.021 0.890 ± 0.013 0.549 ± 0.047
+Text+ Chem T561 0.631 ± 0.048 0.442 ± 0.085 0.559 ± .043 0.745 ± 0.010 0.516 ± 0.022
+Multimodal 3D Infomax 45 0.744 ± 0.045 0.505 ± 0.058 0.691 ± 0.034 0.868 ± 0.024 0.471 ± 0.062
+GraphMVP46 0.766 ± 0.035 0.564 ± 0.062 0.713 ± 0.024 0.910 ± 0.014 0.548 ± 0.053
+DVMP47 0.770 ± 0.033 0.535 ± 0.047 0.717 ± 0.028 0.893 ± 0.019 0.537 ± 0.054
+MMPolymer49 0.803 ± 0.035 0.558 ± 0.062 0.731 ± 0.019 0.899 ± 0.024 0.538 ± 0.053
+Uni-Poly (ours) 0.823 ± 0.023 0.588 ± 0.049 0.775 ± 0.022 0.921 ± 0.011 0.618 ± 0.045
+The best result is highlighted in bold, while the best result in baseline models is indicated with an underline.
+https://doi.org/10.1038/s41524-025-01652-z Article
+npj Computational Materials |          (2025) 11:153 2
+
+--- PAGE 3 ---
+To further analyze the dataset’s content at a macro level, we created a
+word cloud to visualize the high-frequ e n c yt e r m sa p p e a r i n gi nt h ec a p t i o n s ,
+a ss h o w ni nF i g .2. The word cloud highlights key aspects of the captions,
+including applications (e.g.,“application”, “coating,” and “device,”), prop-
+erties (e.g., “thermal,”“ electronic,” and “mechanical”), structures (e.g.,
+“backbone,”“ ring,” and “aromatic”), and synthesis processes (e.g., “poly-
+condensation” and “polymerization”).
+The accuracy of captions is crucial for demonstrating the effectiveness
+of our approach. We manually evaluated the captions in the Poly-Caption
+dataset in two aspects. The ﬁrst aspect focuses on whether the captions
+accurately retain the information we provided during generation. This
+includes fundamental polymer details such as polymer names, monomer
+molecular formulas, monomer molecul a rw e i g h t s ,a n dp o l y m e rs y n t h e s i s
+information. We randomly sampled 100 captions from the Poly-Caption
+dataset and compared them with the input JSON data. Our analysis con-
+ﬁrmed that all captions accurately reproduce these fundamental details. This
+ﬁnding indicates that the LLM demonstrates a precise understanding of the
+provided information. The veriﬁcation of the remaining information posed
+additional challenges, primarily due to the inherent non-uniqueness and
+subjectivity in describing polymer structures, properties, and applications.
+Given the inherent challenges in evaluating such captions, the accuracy
+assessment of certain rare polymers is dif ﬁcult even for polymer experts.
+Consequently, we selected captionscorresponding to the 30 most common
+polymers from the dataset for a comprehensive analysis (sample captions
+are provided in the SI). Following a thorough review and evaluation by
+polymer experts, it was observed that while certain terms, such as “high-
+performance,” were general or vague, the captions overall accurately cap-
+tured the actual performance of the polymers and offered valuable insights
+into the ﬁeld of polymer science. Thisﬁnding validates the effectiveness of
+our knowledge-enhanced prompting ingenerating factually accurate cap-
+tions that integrate domain-speciﬁck n o w l e d g e .
+To assess the speciﬁc contribution of the textual modality to prediction
+performance, we evaluated a variant of Uni-Poly, namely Uni-Polyw/o-text,
+which integrates multiple structural representations but excludes captions.
+The results, as shown in Fig.3, indicate that while Uni-Polyw/o-text achieves
+performance comparable to Uni-Poly for Tg prediction, it demonstrates a
+notable decrease in R² for the other properties, with declines ranging from
+~1.6 to 3.9%. These ﬁndings suggest that the inclusion of textual data
+provides valuable domain-speciﬁc insights, enhancing predictive accuracy.
+F o re x a m p l e ,c a p t i o n sh i g h l i g h ta r e a so fa p p l i c a t i o n ,s u c ha sa d v a n c e d
+devices or coatings, and environmental conditions like high-temperature
+usage or chemical exposure. These ref erences offer criti cal information
+about performance requirements and context, suggesting properties such as
+resistivity, thermal performance, mechanical strength, and chemical stabi-
+lity. Beyond applications, captions enrich the understanding of chemical
+structure. While structural representations reveal functional groups, cap-
+tions incorporate domain-speciﬁc knowledge, offering experiential insights
+into the roles and impacts of these groups on polymer properties. This
+combination enhances the predictive power of structural data by linking it to
+practical expertise. Captions also reveal the connection between synthesis
+methods or processing conditions and r esulting material properties. By
+detailing how fabrication processes in ﬂuence functional outcomes, they
+provide a deeper understanding of the relationship between material pre-
+paration and performance. Overall, textual information complements
+structural representations, especially for properties shaped by real-world
+usage and processing scenarios.
+To further quantify the impact of speci ﬁc words or phrases on pre-
+dictions and to inform future efforts in more effective prompt engineering,
+we conducted an in-depth analysis of the attention weights assigned to
+tokens by the text encoder in Uni-Polyfor the best-performing Tg predic-
+tion task. These attention weights can be interpreted as indicators of the
+importance of tokens in the subsequent embedding and ﬁnal prediction
+results. Figure4 presents the top 20 tokens with the highest average attention
+w e i g h t si nt h eP o l y - C a p t i o nd a t a s e t .We observed that hi gh-importance
+tokens can be broadly categorized into four groups:
+Fig. 1 | Distribution of caption lengths in the Poly-Caption dataset. The histo-
+gram shows the normalized frequency distribution of caption lengths, measured by
+the number of words, in the Poly-Caption dataset.
+Fig. 2 | Word cloud generated from the polymer captions. The word cloud
+visualizes the most frequent terms appearing in the captions from the Poly-Caption
+dataset. Larger words indicate a higher frequency of occurrence.
+Fig. 3 | Impact of the textual input on model performance.Bar chart comparing the
+R² score of the Uni-Poly model and its variant without textual input (Uni-Polyw/o-text)
+across ﬁve prediction tasks.
+https://doi.org/10.1038/s41524-025-01652-z Article
+npj Computational Materials |          (2025) 11:153 3
+
+--- PAGE 4 ---
+Chemical structure-related tokens . This category constitutes the lar-
+gest proportion of high-importance tokens, including “aromatic”,
+“benz”, and “phenol”, which primarily re ﬂect the in ﬂuence of polymer
+monomer structures or precursor reactants on Tg. Notably, “aromatic”
+stands out with a signi ﬁcantly higher importance weight than other
+tokens. This aligns with chemical intuition, as the aromaticity of a
+polymer affects chain rigidity and intermolecular interactions, which are
+strongly correlated with Tg.
+Application-related tokens. Certain words, such as “aerospace ” and
+“adhesive ”, indicate that the intended use of a polymer may implicitly
+correlate with its Tg. For instance, polymers used in aerospace
+applications often require high thermal stability, which translates to a
+higher Tg. Similarly, adhesives ma y have Tg implications depending
+on their required ﬂexibility and operating temperature. The presence
+of these tokens in high-importance r a n k i n g ss u g g e s t st h a tt h em o d e l
+captures such contextual information and integrates it into its
+predictions.
+Descriptors of polymer properties. Tokens like “versatility”, “organic”,
+and “intricate” represent broader or more abstract descriptions of a
+polymer’s characteristics. These words do not directly specify chemical
+structures or applications but rather encapsulate generalizable features
+that may be associated with properties.
+Adverbs and emphasizing words. Examples include “paramount” and
+“robust”. While it is dif ﬁcult to infer their direct connection to the
+property from the tokens alone, we examined their usage within the Poly-
+Caption dataset by retrieving sentences containing these keywords. We
+found that such words are typically used to describe key property
+properties, such as “… with paramount heat resistance ”, indicating a
+speciﬁc property, which is correlated with the predicted property.
+The results offer insights for future prompt engineering. For instance,
+strategically emphasizing words related to structure, application, or prop-
+erty description in input prompts could optimize model performance and
+improve interpretability.
+Task-modality attention weights analysis
+To further explain the contributio n of different modalities to speci ﬁc
+property prediction tasks, we analyzed the attention weight matrix learned
+by the Uni-Poly model, as visualized in Fig.5.
+Among all modalities in the Uni-Poly representation, SMILES and FP
+consistently emerge as the dominant contributors across various properties.
+This underscores that two-dimensional structural features are the primary
+determinants for recognizing backbone and functional group types, which
+are essential for polymer property pre diction. Other modalities, such as
+Graph, Geom, and Text, serve primarily complementary roles. Notably,
+Geom demonstrates higher relevance only in Tm prediction, while Text
+shows the lowest overall contribution,functioning mainly as supplementary
+information.
+Density (De). SMILES and FP effectively capture key chemical features,
+such as monomer mass and side-chain size. Graph and Geom provide
+moderate contributions, reﬂecting topological and spatial conﬁgurations
+that inﬂuence packing ef ﬁciency.
+Electronic resistance (Er) . SMILES and FP dominate by identifying
+conductive motifs like conjugated systems and functional groups. Due to
+the relatively low prediction accuracy based solely on structural infor-
+mation, Text becomes more valuable, offering application-related
+insights into electronic properties.
+Decomposition temperature (Td) . FP exhibits strong contributions by
+detecting thermally stable substructures, such as aromatic groups and
+cyclic structures, while SMILES complements this by providing backbone
+information. Text contributes moderately by capturing branching
+Fig. 4 | Important tokens identiﬁed from captions
+in the Poly-Caption dataset. The bar chart shows
+the 20 tokens with the highest average importance
+scores assigned by the model.
+Fig. 5 | The contribution for each modality across prediction tasks. The heatmap
+visualizes the modality-speciﬁc attention weights learned by the Uni-Poly model for
+each prediction task.
+https://doi.org/10.1038/s41524-025-01652-z Article
+npj Computational Materials |          (2025) 11:153 4
+
+--- PAGE 5 ---
+features, which restrict chain segment mobility and enhance thermal
+stability.
+Glass transition temperature (Tg) . The attention weights for SMILES
+and FP are signiﬁcantly higher compared to other modalities, while those
+for Text and Geom are notably lower. This is likely because Tg is in ﬂu-
+enced by factors such as chain segment mobility, side-group bulkiness,
+and polar group interactions — all closely related to monomer structure
+and functional groups. Consequently, two-dimensional descriptors like
+SMILES and FP, which excel at identifying structural motifs, can largely
+determine Tg, leaving minimal room for supplementary contributions
+from Text and Geom.
+Melting temperature (Tm) . For Tm, FP remains the most signi ﬁcant
+modality, but Geom contributes above the average. This reﬂects its ability
+to emphasize spatial con ﬁgurations and molecular symmetry, which
+govern crystallinity and play a critical role in determining Tm.
+Ablation study
+In this section, we present ablation experiments to evaluate the effectiveness
+of various components within t he Uni-Poly framework. Speci ﬁcally, we
+assess how performance changes relative to the full Uni-Poly model when
+individual components are removed or altered. The conﬁgurations tested
+are as follows:
+“w/o pre-train ”. This variant skips the pretraining phase that aligns
+features across modalities. It evaluates the importance of contrastive
+learning for feature alignment.
+“w/o multi-head attention ”. The multi-head attention mechanism for
+feature reﬁnement is removed, testing the impact of inter-modal feature
+fusion.
+“Mean pooling”. The attention-based weighted pooling layer is replaced
+with simple average pooling, assessing the impact of attention-based
+weighting on modality aggregation.
+“Frozen encoder ”. Encoder parameters are frozen during training,
+restricting the model to optimize only the downstream components.
+The results in Table2 show that freezing the encoder parameters leads
+to the most signiﬁcant performance degradation, particularly for properties
+Tm and Er. This underscores the necessity of end-to-end training inﬁne-
+tuning the pre-trained encoders to adapt them effectively to downstream
+tasks. Skipping the pretraining phas e also causes a substantial decline,
+emphasizing the importance of contrastive learning in aligning features
+across modalities and adapting encoders — originally trained on small-
+molecule SMILES datasets— to the polymer domain. Similarly, replacing the
+attention-based weighted pooling layer with mean pooling results in notable
+performance reduction, conﬁrming that dynamic weighting enhances fea-
+ture aggregation by prioritizing informative components. Although
+removing the multi-head attention mechanism results in relatively smaller
+accuracy reductions, its absence consistently lowers performance across all
+properties. This indicates that multi-head attention provides bene ﬁcial
+enhancements to inter-modal feature fusion and reﬁnement, even if it is not
+a critical component. These ﬁndings highlight the importance of each
+component in the Uni-Poly framework, where the interplay of these ele-
+ments collectively ensures robust and accurate predictions of polymer
+properties.
+Applicability to copolymers
+Regarding its current applicability, this study focuses exclusively on
+homopolymers, while the extension to copolymer systems, which are of
+greater relevance in many engineering applications, remains an open area
+for further exploration. Common approaches to handling copolymers can
+be broadly categorized into two types. Theﬁrst treats the copolymer chain as
+an oligomer or a periodic structure, which is then considered as a monomer
+for feature extraction and analysis.This method has demonstrated strong
+applicability, particularly in graph-based representations
+22,40. This method
+can be integrated into the Uni-Poly framework by treating the resulting unit
+as an equivalent “monomer.” However, a signi ﬁcant limitation of this
+method is that it results in excessively long chain structure, which sub-
+stantially increases computationalc o s t si nt h eS M I L E Se n c o d i n ga n d3 D
+coordinate branches of Uni-Poly. As a result, this approach is currently
+computationally impractical withinour framework. The second approach
+involves computing monomer-level descriptors independently, followed by
+aggregation based on their composition ratios. In the context of Uni-Poly,
+this would involve generating embeddings for each monomer across all
+modalities and then linearly combining them to represent the copolymer.
+While this strategy has been shown to work well for handcrafted features
+such as molecular ﬁngerprints
+41, this approach is less suitable for learned
+representations, particularly the textual captions, which encode con-
+textualized chemical semantics. A simple linear averaging of such repre-
+sentations lacks clear physical or chemical meaning. Instead, a more
+promising direction would be to generate copolymer-speciﬁcc a p t i o n st h a t
+explicitly reﬂect monomer composition and sequence arrangement. Future
+work will therefore focus on develo ping tailored prompt templates and
+architectural adjustments to more effectively encode copolymer-speci ﬁc
+features, such as monomer composition and sequence.
+Discussion
+In this work, we introduced Uni-Poly , a comprehensive multimodal fra-
+mework designed for polymer property prediction by integrating structural
+representations (SMILES, 2D molecular graphs, 3D geometries, and ﬁn-
+gerprints) with textual descriptions embedding domain-speciﬁck n o w l e d g e .
+Uni-Poly represents a paradigm shift in polymer informatics by system-
+atically leveraging diverse data modalities to achieve a uniﬁed representation
+of polymers.
+To validate Uni-Poly’s effectiveness, we ﬁrst constructed a polymer
+caption dataset, Poly-Caption, which incorporates domain knowledge
+through large language models. Experimental results demonstrate that Uni-
+Poly consistently outperforms sing le-modal and existing multimodal
+approaches across a range of polymer property prediction tasks, including
+glass transition temperature, density, thermal decomposition temperature,
+melting point, and electrical resistiv ity. Notably, the inclusion of textual
+descriptions provides domain-speciﬁc insights that enhance performance,
+particularly for properties inﬂuenced by practical applications or processing
+conditions. A detailed analysis of modality-speciﬁc contributions reveals the
+complementary strengths of different data types, with SMILES and mole-
+cular ﬁngerprints consistently showing the strongest impact, while text and
+geometry add critical contextual and structural layers for speciﬁc properties.
+These ﬁndings underscore the transformative potential of multimodal
+and multi-domain approaches in polymer science. By offering a more
+comprehensive representation of pol ymers, Uni-Poly enables enhanced
+predictive accuracy, supporting high-throughput polymer screening and
+the targeted discovery of novel materials.
+Future research will focus on the integration of more comprehensive
+and information-rich polymer structural features to further enhance pre-
+dictive accuracy and expand the applicability of our framework to a broader
+range of properties and more complex polymer systems, such as
+Table 2 | R² deviations of various ablation con ﬁgurations
+compared to the full Uni-Poly framework
+Conﬁguration De Er Td Tg Tm
+w/o pre-train −0.015 −0.025 −0.011 −0.013 −0.016
+w/o multi-head −0.011 −0.010 −0.005 −0.004 −0.016
+Mean pooling −0.018 −0.026 −0.017 −0.006 −0.010
+Frozen encoder −0.019 −0.040 −0.018 −0.005 −0.044
+https://doi.org/10.1038/s41524-025-01652-z Article
+npj Computational Materials |          (2025) 11:153 5
+
+--- PAGE 6 ---
+copolymers. By incorporating these advancements, we aim to improve the
+model’s capability in predicting diverse polymer behaviors, ultimately
+enabling more reliable and versatile applications in polymer informatics.
+Methods
+Polymer representation
+P o l y m e rr e p r e s e n t a t i o na i m st oc o n v e r tt h ec h e m i c a li n f o r m a t i o no fp o l y -
+mer into forms that can be processed b y machine learning algorithms. A
+variety of methods have been developed to represent polymers. In Fig.6,w e
+illustrate several representation methods using polystyrene as an example.
+These polymer representations are categorized into two types: structural
+representations and textual representations, which are brie ﬂyi n t r o -
+duced below.
+Due to the complexity of polymer chain segments, structural repre-
+sentations of polymers are often simpli ﬁed by focusing only on the
+monomer unit. Commonly, four types of structural representations are used
+for monomers: molecularﬁngerprint, sequential representation, 2D graph,
+and 3D geometry.
+Molecular ﬁngerprint. Molecular ﬁngerprints6 encode chemical infor-
+mation into binary vectors that indicate the presence or absence of pre-
+deﬁned chemical features and substructures. Their primary advantage
+lies in their simplicity and computational ef ﬁciency, enabling rapid
+similarity searches and clustering. However, ﬁngerprint-based repre-
+sentations heavily depend on prede ﬁned substructures, which can limit
+their ability to capture the full complexity of diverse polymer structures.
+Sequential. SMILES (simpli ﬁed molecular input line entry system) 42 is
+the most popular linear notation used to describe chemical structures.
+For polymers, SMILES notation often replaces the connection points
+between repeating units with an asterisk (*) to indicate where monomers
+are linked. SMILES representations are compact, easily interpretable, and
+well-suited for sequence-based machine learning models, such as BERT
+15
+and Transformers16. However, due to the limitations of its encoding rules,
+the linear format may separate adjacent atoms into distant parts of the
+string, making it challenging to capture some global structural
+information.
+2D graph. In 2D topology graphs, atoms are represented as nodes and
+bonds as edges, providing a detailed depiction of molecular connectivity
+and bonding relationships. Graph neural networks, including graph
+convolutional networks (GCNs)
+17, GraphSAGE 18, graph isomorphism
+networks (GINs) 19, and graph attention networks (GATs) 20, are com-
+monly employed to encode these graphs into feature vectors that capture
+both local and global structural information of polymer monomers.
+Compared to SMILES, 2D graphs explicitly represent bonds, making
+them more effective at capturing connectivity information.
+3D geometry . 3D geometry graphs incorporate atomic coordinates,
+offering a representation of the spatial arrangement of atoms. Geometric
+deep learning techniques, such as spatial graph networks, are often used
+to process these 3D geometries. The primary advantage of 3D geometry
+graphs lies in their ability to capture stereochemistry and conformational
+details critical for predicting properties related to molecular conforma-
+tion, such as energy and molecular interactions. However, obtaining
+accurate 3D geometries can be computationally intensive, and these
+representations are often sensitive to variations in molecular
+conformation.
+Textual representation . Text-based representations use natural lan-
+guage descriptions to convey domain-speci ﬁc knowledge about poly-
+mers, as illustrated in Fig. 6b. There is no strict de ﬁnition of what
+information a caption must contain; captions may include details about
+chemical composition and structure, morphology, application scenarios,
+preparation methods, and more. Although captions cannot describe the
+detailed chemical structure of a monomer as precisely as structural
+representations, their scope is signi ﬁcantly broader and often closely
+related to the polymer ’s physicochemical properties. These textual
+descriptions are processed using language models such as BERT
+33,35 and
+Transformer34 models, which generate semantic embeddings that
+encapsulate the context and knowledge expressed in the text. Another
+critical consideration is data availability. While the small-molecule
+domain bene ﬁts from publicly available caption databases like ChEBI-
+2043, no large-scale and publicly accessible datasets are currently available
+for polymers, presenting a signi ﬁcant challenge for utilizing text-based
+representations.
+Multimodal representation . While single-modality methods have
+shown promise in capturing speci ﬁc aspects of polymer features, they
+are limited in their ability to comp rehensively represent polymers.
+Multimodal representations aim to utilize the strengths of different
+data modalities to create an integrated representation of polymers.
+Multimodal methods have been ex plored in various chemical
+domains, including reaction prediction, molecular property predic-
+tion and drug –drug interaction
+33,44–48. In the context of polymers,
+recent studies 49,50 have proposed to combine both SMILES and 3D
+geometry representations. However, restricting integration to only a
+subset of modalities prevents thes e methods from fully exploiting the
+diverse structural information av ailable for polymers. Moreover, no
+current attempts have been made to incorporate text-based repre-
+sentations into polymer modeling, further limiting the expressive
+power of these approaches.
+Datasets
+We conducted a comprehensive evaluation of Uni-Poly using data-
+sets collected from the largest publ icly available polymer database,
+PolyInfo
+51 (The copyrights of this database are owned by the National
+Institute for Materials Science [NIMS]). Speci ﬁcally, we focused on
+ﬁve key polymer properties: glass transition temperature (Tg),
+Fig. 6 | Different representations for polystyrene in the structural domain and in
+the textual domain. Illustration of various input representations used in the Uni-
+Poly framework, including a the structural domain, SMILES notation, molecular
+geometry, ﬁngerprints, and molecular graphs and b the textual domain, a natural
+language description provides domain-related context.
+https://doi.org/10.1038/s41524-025-01652-z Article
+npj Computational Materials |          (2025) 11:153 6
+
+--- PAGE 7 ---
+density (De), thermal decomposit ion temperature (Td), melting
+point (Tm), and electrical resistivity (Er). These properties span a
+wide range of physical and chemical behaviors, involving different
+mechanisms such as thermal stabili ty, phase transition, and electro-
+nic properties. As such, they provide versatility and robustness of the
+Uni-Poly model in capturing diverse property relationships. For a
+given monomer, different samples can exhibit signi ﬁcant variations
+in their properties due to variations in experimental conditions,
+synthesis routes, or measurement m ethods. Such variability intro-
+duces inherent noise into the data, which poses an additional chal-
+lenge for accurate prediction. To reduce noise and provide a more
+consistent target for model training, we grouped samples for the same
+monomer and computed the average value for each property to serve
+as a representative value. After pr ocessing, our dataset comprised a
+total of 15,443 structure –property data points, providing a diverse
+and comprehensive foundation fo r evaluating Uni-Poly. The dis-
+tribution and number of samples for each property ar ei l l u s t r a t e di n
+Fig. 7.
+We propose Uni-Poly, a comprehensive framework designed to unify
+multiple data modaliti es relevant to polymer materials into a single
+embedding. In this section, we introduce the core components of Uni-Poly,
+a ss h o w ni nF i g .8.
+Structural and textual representation generation
+The structural and textual representation generation module generates
+various representations, including SMILES, 2D molecular graphs, 3D geo-
+metries, molecular ﬁngerprints, and textual descriptions. For structural
+representations, we employ establis hed methodologies to extract data
+directly from available datasets or utilize specialized tools such as RDKit
+52.
+Generating textual representations for polymers is challenging due to
+the absence of large-scale polymer-speciﬁc caption datasets. To address this
+gap, we adopted a synthetic data approach and constructed Poly-Caption, a
+comprehensive dataset that integrates extensive domain-speciﬁck n o w l e d g e
+in polymer science.
+General-purpose LLMs, such as GPTs
+53, possess vast domain-speciﬁc
+knowledge from pretraining on extensive text corpora. However, these
+models face issues such as hallucination
+54,55, where factually inaccurate
+information is generated, and output variability, which can undermine their
+reliability for scienti ﬁc applications. To mitigate these limitations, we
+implemented a knowledge-enhanced prompting strategy. This approach
+employs in-context learning to guide the generation process through
+carefully designed prompts. Our prompting strategy is structured into three
+key components:
+ Role deﬁnition and task speciﬁcation:We ﬁrst deﬁne the model’sr o l e
+and explicitly outline the task of caption generation. Additionally, we
+impose constraints on the contentand style of the captions to ensure
+relevance and consistency.
+ Structured polymer knowledge:We provide the model with a JSON
+dataset containing essential polymer information, including SMILES,
+polymer type, structural name, molecular formula, molecular weight,
+processing conditions, and synthesisprocedures. The selection of this
+information is critical to balance it s reference utility and avoid data
+leakage. This structured input enhances the factual accuracy of the
+generated captions.
+ Polymer caption examples: To facilitate few-shot learning, we
+manually created three polymer caption examples that clarify the
+expected scope and format of th e captions, improving output
+consistency. Considering our ultimate goal of predicting polymer
+properties, we incorporated various descriptive information directly
+related to polymer properties.
+By adopting this approach, we generated a caption for each polymer
+that combines the inherent domain knowledge of the LLM with the addi-
+tional structured information provi ded. The resulting captions include
+details about the polymer’s name, type, structural characteristics, synthesis
+methods, general properties, and potential applications, which provides a
+domain-view for polymer representation. The complete prompt template
+used in this process is provided in the SI, offering readers a detailed
+understanding of the speciﬁc steps and methodology involved.
+Embedding and projection
+In this module, each modality is independently encoded to generate an
+initial embedding that captures its unique information, which is then pro-
+jected into a joint representation space for further processing. A high-level
+overview of each encoder is provided below, while detailed architectures are
+available in the referenced literatures.
+G i v e nap o l y m e rm o n o m e rr e p r e s e n t e db yi t sS M I L E SSðÞ ,g r a p hGðÞ ,
+geometry GðÞ , ﬁngerprints FðÞ and caption CðÞ ,w ed e ﬁne the polymer
+Fig. 7 | Dataset overview.The bar plot (top left) shows dataset sizes for various polymer tasks. Other subplots show the distributions of the properties, including density (De),
+electronic resistivity (Er), thermal decomposition temperature (Td), glass transition temperature (Tg), and melting temperature (Tm).
+https://doi.org/10.1038/s41524-025-01652-z Article
+npj Computational Materials |          (2025) 11:153 7
+
+--- PAGE 8 ---
+representation as follows:
+P ¼ S; G;G;F; CðÞ ; ð1Þ
+For modalityr 2 S; G; G;CðÞ , we use a speciﬁce n c o d e rEr to form the
+corresponding embeddinghr .
+SMILES. We employ ChemBERTa 14, a transformer model pre-trained
+on a large SMILES dataset using a masked language modeling strategy, as
+the SMILES encoder. Following established practices, the embedding of
+the ﬁrst token from the encoder’s last hidden state is used as the SMILES
+embedding, denoted as: h
+S,
+hS ¼ ES SðÞ : ð2Þ
+Graph. The graph isomorphism network (GIN)19 is utilized for encoding
+graph-based representations. GIN takes atom attributes ( XG), bond
+attributes (E), and the adjacency matrix ( A) as inputs. Through multiple
+interaction layers, it iteratively updates node features by aggregating
+neighbor information. A readout function aggregates the updated node
+features into the graph embedding h
+G,
+hG ¼ EG GðÞ ; G ¼ XG; E; A
+/C0/C1
+: ð3Þ
+Geometry. SchNet26, designed for quantum chemistry tasks, is employed
+to generate geometry-based embeddings. SchNet processes atom attri-
+butes (X
+G) and atom positions ( R) using continuous ﬁlter convolutions
+and interaction blocks to generate the geometry embedding hG,
+hG ¼ EG GðÞ ; G ¼ XG; R
+/C0/C1
+: ð4Þ
+Caption. For caption-based representations, we use Text+ Chem T556,a
+language model based on the T5 57 architecture that has been speci ﬁcally
+trained for chemistry-related tasks, including caption generation and
+generating chemical representations from text. Similar to the SMILES
+encoder, the embedding of the ﬁrst token from the last hidden state is
+used as the caption embedding, denoted as h
+C , which captures the
+semantic meaning of the caption,
+hC ¼ EC CðÞ : ð5Þ
+Fingerprints are inherently vecto rized representations of molecular
+structures. We directly use the Morgan ﬁngerprint as its embedding
+representation,
+hF ¼ F: ð6Þ
+These embeddings reside in distinct feature spaces due to the differ-
+ences in their original representations. To obtain alignment and consistency
+across modalities while preserving their intrinsic information content, we
+introduce a projection layer ρ for each modality. The projection layer is
+modality-speciﬁc, transforming the individual embeddings into a shared
+space representation. The respective embeddings after projection can be
+represented as follows:
+H
+r ¼ ρr hr
+/C0/C1
+; 8r 2 P; ð7Þ
+where Hr 2 Rd represents the embedding vector of the modality r with
+dimensiond. The stacked embedding matrix for all modalities is denoted as
+H 2 R Pjj × d , which is used for subsequent processing.
+Fig. 8 | Overview of the Uni-Poly framework. The process begins with knowledge-
+enhanced prompting using a large language model to generate polymer captions.
+Multimodal data, including text, geometry, graph representations,ﬁngerprints, and
+SMILES, are encoded through modality-speciﬁc encoders to generate uniﬁed modality
+embeddings. These embeddings are then projected into a shared space and pre-trained
+using contrastive learning. Subsequently, the framework employs a multi-head atten-
+tion mechanism and a feed-forward network to facilitate reﬁnement. Finally, an
+attention-based weighted pooling layer aggregates the reﬁned embeddings into theﬁnal
+Uni-Poly embedding, which can be used for polymer property prediction tasks.
+https://doi.org/10.1038/s41524-025-01652-z Article
+npj Computational Materials |          (2025) 11:153 8
+
+--- PAGE 9 ---
+Fusion module
+To effectively utilize information from all available modalities, we employ a
+multi-head attention mechanism58 and attention-based pooling to enhance
+the integration and fusion of inter -modal information. The embedding
+matrix H is ﬁrst updated through multi-head attention:
+Hrefined ¼ Multihead HðÞ ; ð8Þ
+where Multiheadð/C1Þ denotes the multi-head attention mechanism that
+captures complex inter-modal relationships by computing attention scores
+across modalities and generating reﬁned feature representations. The output
+is reﬁned through residual connections and layer normalization to stabilize
+training, followed by an attention-based weighted pooling mechanism that
+determines the contribution of each modality. The importance of a modality
+r is computed through an attention network:
+α
+r ¼ exp ωr /C1 Hrefined;r þ br
+/C0/C1
+P
+r0 2P exp ωr0 /C1 Hrefined;r0 þ br0
+/C0/C1 ð9Þ
+where ωr and br are learnable parameters. Theﬁnal Uni-Poly embedding
+HUni/C0 Poly 2 Rd is computed as the weighted sum of each individual
+modality embeddings:
+HUni/C0 Poly ¼
+X
+r2P αr /C1 Hrefined;r: ð10Þ
+Output module
+The output module generates the model’s ﬁnal outputs. In our work, we
+followed a common practice with a two-stage paradigm of pretraining and
+ﬁnetuning.
+In this work, we adopt cross- modal contrastive learning59 as self-
+supervised pretraining. This method aligns data across different modalities
+by ensuring that embeddings of the same data point are closely positioned in
+the vector space, while embeddings of distinct data points are pushed farther
+apart without the need for explicit annotations. Speciﬁcally, we utilize the
+InfoNCE
+60 loss to maximize the cosine similarity between positive pairs
+(representations of different modalities of the same polymer) while mini-
+mizing the similarity between negative pairs (representations of different
+polymers). This enables efﬁcient learning of shared representations across
+modalities, providing a robust foundation for downstream tasks.
+After pretraining, we utilize a simple Multi-Layer Perceptron (MLP) as
+the prediction head for estimating polymer properties. The output from the
+fusion module, denoted as H
+Uni/C0 Poly, is fed into the MLP to make ﬁnal
+predictions:
+y ¼ MLP H Uni/C0 Poly
+/C16/C17
+; ð10Þ
+where y is the target property.
+Baselines
+For a comprehensive comparison, w e evaluated Uni-Poly against both
+single-modal models and multimodal baselines. Speci ﬁcally, the single-
+modal models included Morgan Fingerprints 6,S M I L E S - B E R T11,
+ChemBERTa14,G C N 17,G I N 19, SchNet 26,U n i - m o l31,3 DI n f o m a x45,
+GraphMVP46,D V M P47,a n dM M P o l y m e r49. Additionally, we develop a
+text-based model that leverages embeddings generated from Text+Chem
+T561 for the textual descriptions baseline. For a fair comparison, all baseline
+models are trained with the default settings.
+Implementation details
+For the SMILES representations in the dataset, weﬁrst convert all SMILES
+into canonical SMILES, followed by tokenization using ChemBERTa ’s
+tokenizer to ensure consistent and meaningful input sequences. For graphs,
+we utilized atomic properties, including atom type and chirality tag, as node
+features, while bond type and bond direction were used as edge features to
+capture the bonding context. Regarding 3D molecular structures, we
+replaced connection points represented by asterisks ( *) with hydrogen
+atoms to ensure stability, followed by geometry optimization using the
+MMFF94
+62 force ﬁeld in RDKit to achieve minimum energy conformations
+and obtain the ﬁnal atomic coordinates. For molecular ﬁngerprints, we
+generated 1024-bit binary vectors with a radius of 2 using RDKit’s ﬁnger-
+printing functionality. For the text captions, considering the capabilities of
+existing large language models, we utilized the state-of-the-art GPT-453 as
+t h eb a c k b o n et og e n e r a t ed o m a i n - s p e c iﬁc captions, leveraging its advanced
+proﬁciency in understanding and producing scientiﬁc language. A caption
+was generated for each unique SMILES entry in the database, resulting in a
+total of 10,142 SMILES-caption pairs. Subsequently, the structural and
+textual representations were encoded into modality-speciﬁc embeddings
+and projected into the Uni-Poly space withd ¼ 256 for further processing.
+During the contrastive pretraining phase, the model was opti-
+mized for ten epochs on the entire po lymer dataset, using a batch size of
+32 and the Adam 63 optimizer with an initial learning rate of 1e-5. The
+scale parameter τ for contrastive learning was set to 0.07. In the ﬁne-
+tuning stage, 10% of the dataset was used for testing, while the
+remaining 90% was allocated for training and validation. To enhance
+numerical stability, Z-score norm alization was applied to each prop-
+erty prediction task. The model was trained for 100 epochs with early
+stopping, using a batch size of 32 and the Adam optimizer with an
+initial learning rate of 1e-4. Addit ionally, a cosine annealing learning
+rate scheduler was used to adjust the learning rate throughout the
+training process. For further details regarding the software and hard-
+ware platforms, model training pro cedures, and hyperparameter spe-
+ciﬁcations, please refer to SI.
+Evaluation metrics
+In our property prediction tasks, all of which are regression tasks, we pri-
+marily evaluate model p erformance using the R-squared ( R²) metric.
+Additionally, root mean square error (RMSE) and mean absolute error
+(MAE) are also reported in the SI. To ensure the robustness and reliability of
+our results, we performedﬁvefold cross-validation and presented both the
+mean and standard deviation of the metrics.
+Data availability
+The polymer data utilized for generating the captions and the property data
+supporting the ﬁndings of this study were manually collected from the
+PoLyInfo database by June 2016. (The copyrights of this database are owned
+by the National Institute for Materials Science [NIMS].) Other data were
+available from the authors upon reasonable request. The codes developed
+for this work are available athttps://github.com/huang-qi/Uni-Poly.
+Received: 9 January 2025; Accepted: 8 May 2025;
+References
+1. Pendhari, S. S., Kant, T. & Desai, Y. M. Application of polymer
+composites in civil construction: a general review. Compos. Struct.
+84, 114– 124 (2008).
+2. Ramakrishna, S., Mayer, J., Wintermantel, E. & Leong, K. W.
+Biomedical applications of polymer-composite materials: a review.
+Compos. Sci. Technol. 61, 1189– 1224 (2001).
+3. Schmidt, G. & Malwitz, M. M. Properties of polymer – nanoparticle
+composites. Curr. Opin. Colloid Interface Sci. 8, 103– 108 (2003).
+4. Tjong, S. C. Structural and mechanical properties of polymer
+nanocomposites. Mater. Sci. Eng. R Rep. 53,7 3– 197 (2006).
+5. Siracusa, V., Rocculi, P., Romani, S. & Rosa, M. D. Biodegradable
+polymers for food packaging: a review. Trends Food Sci. Technol. 19,
+634– 643 (2008).
+6. Rogers, D. & Hahn, M. Extended-connectivity ﬁngerprints. J. Chem.
+Inf. Model. 50, 742– 754 (2010).
+https://doi.org/10.1038/s41524-025-01652-z Article
+npj Computational Materials |          (2025) 11:153 9
+
+--- PAGE 10 ---
+7. Ma, R., Liu, Z., Zhang, Q., Liu, Z. & Luo, T. Evaluating polymer
+representations via quantifying structure – property relationships. J.
+Chem. Inf. Model. 59, 3110– 3119 (2019).
+8. Chen, F.-C. Virtual screening of conjugated polymers for organic
+photovoltaic devices using support vector machines and ensemble
+learning. Int. J. Polym. Sci. 2019, 4538514 (2019).
+9. Tao, L., Chen, G. & Li, Y. Machine learning discovery of high-
+temperature polymers. Patterns 2, 100225 (2021).
+10. Schwaller, P. et al. Molecular transformer: a model for uncertainty-
+calibrated chemical reaction prediction. ACS Cent. Sci. 5, 1572– 1583
+(2019).
+11. Wang, S., Guo, Y., Wang, Y., Sun, H. & Huang, J. SMILES-BERT: large
+scale unsupervised pre-training for molecular property prediction. In
+Proc. 10th ACM International Conference on Bioinformatics,
+Computational Biology and Health Informatics 429– 436 (Association
+for Computing Machinery, 2019).
+12. Chithrananda, S., Grand, G. & Ramsundar, B. ChemBERTa: large-
+scale self-supervised pretraining for molecular property prediction.
+Preprint at http://arxiv.org/abs/2010.09885 (2020).
+13. Ross, J. et al. Large-scale chemical language representations capture
+molecular structure and properties. Nat. Mach. Intell. 4, 1256– 1264
+(2022).
+14. Ahmad, W., Simon, E., Chithrananda, S., Grand, G. & Ramsundar, B.
+ChemBERTa-2: towards chemical foundation models. Preprint at
+http://arxiv.org/abs/2209.01712 (2022).
+15. Kuenneth, C. & Ramprasad, R. polyBERT: a chemical language model
+to enable fully machine-driven ultrafast polymer informatics. Nat.
+Commun. 14, 4099 (2023).
+16. Xu, C., Wang, Y. & Barati Farimani, A. TransPolymer: a transformer-
+based language model for polymer property predictions.npj Comput.
+Mater. 9, 64 (2023).
+17. Kipf, T. N. & Welling, M. Semi-supervised classi ﬁcation with graph
+convolutional networks. In International Conference on Learning
+Representations (2022).
+18. Hamilton, W., Ying, Z. & Leskovec, J. Inductive representation
+learning on large graphs. In Proc. 31st International Conference on
+Neural Information Processing Systems 1025– 1035 (Curran
+Associates Inc., 2017).
+19. Xu, K., Hu, W., Leskovec, J. & Jegelka, S. How powerful are graph
+neural networks? In International Conference on Learning
+Representations (2018).
+20. Velickovic, P. et al. Graph attention networks. stat 1050,1 0– 48550
+(2017).
+21. Aldeghi, M. & Coley, C. W. A graph representation of molecular
+ensembles for polymer property prediction. Chem. Sci. 13,
+10486– 10498 (2022).
+22. Antoniuk, E. R., Li, P., Kailkhura, B. & Hiszpanski, A. M. Representing
+polymers as periodic graphs with learned descriptors for accurate
+polymer property predictions. J. Chem. Inf. Model.
+62, 5435– 5445
+(2022).
+23. Park, J. et al. Prediction and interpretation of polymer properties
+using the graph convolutional network. ACS Polym. Au . 2,2 1 3– 222
+(2022).
+24. Queen, O. et al. Polymer graph neural networks for multitask property
+learning. npj Comput. Mater. 9, 90 (2023).
+25. Xia, J. et al. Mole-BERT: rethinking pre-training graph neural networks
+for molecules. In The Eleventh International Conference on Learning
+Representations (2023).
+26. Schütt, K. et al. Schnet: a continuous- ﬁlter convolutional neural
+network for modeling quantum interactions. InProc. 31st International
+Conference on Neural Information Processing System (Curran
+Associates Inc., 2017).
+27. Smith, J. S., Isayev, O. & Roitberg, A. E. ANI-1: an extensible neural
+network potential with DFT accuracy at forceﬁeld computational cost.
+Chem. Sci. 8, 3192– 3203 (2017).
+28. Zhang, L., Han, J., Wang, H., Car, R. & E, W. Deep potential molecular
+dynamics: a scalable model with the accuracy of quantum mechanics.
+Phys. Rev. Lett. 120, 143001 (2018).
+29. Batzner, S. et al. E(3)-equivariant graph neural networks for data-efﬁcient
+and accurate interatomic potentials.Nat. Commun.13, 2453 (2022).
+30. Gasteiger, J. et al. GemNet-OC: developing graph neural networks for
+large and diverse molecular simulation datasets. Preprint at
+arXiv:2204.02782 (2022).
+31. Zhou, G. et al. Uni-Mol: a universal 3d molecular representation
+learning framework. In Proc. 11th International Conference on
+Learning Representations (ICLR, 2023).
+32. Zhu, Y. et al. Molecular contrastive pretraining with collaborative
+featurizations. J. Chem. Inf. Model. 64, 1112– 1122 (2024).
+33. Su, B. et al. A molecular multimodal foundation model associating
+molecule graphs with natural language. Preprint at arXiv:2209.05481
+(2022).
+34. Zhao, H. et al. GIMLET: a uni ﬁed graph-text model for instruction-
+based molecule zero-shot learning. In Proc. 37th International
+Conference on Neural Information Processing Systems 5850– 5887
+(Curran Associates Inc., 2024).
+35. Liu, S. et al. Multi-modal molecule structure – text model for text-based
+retrieval and editing. Nat. Mach. Intell. 5, 1447– 1457 (2023).
+36. Liu, S., Wen, T., Pattamatta, A. S. L. S. & Srolovitz, D. J. A prompt-
+engineered large language model, deep learning work ﬂow for
+materials classiﬁcation. Mater. Today 80, 240– 249 (2024).
+37. Polak, M. P. & Morgan, D. Extracting accurate materials data from
+research papers with conversational language models and prompt
+engineering. Nat. Commun. 15, 1569 (2024).
+38. Wellen, R. M. R., Canedo, E. & Rabello, M. S. Nonisothermal cold
+crystallization of poly(ethylene terephthalate). J. Mater. Res. 26,
+1107– 1115 (2011).
+39. Lin, T.-S. et al. BigSMILES: a structurally-based line notation for
+describing macromolecules. ACS Cent. Sci. 5, 1523– 1531 (2019).
+40. Huang, Q. et al. Enhancing copolymer property prediction through the
+weighted-chained-SMILES machine learning framework. ACS Appl.
+Polym. Mater. 6, 3666– 3675 (2024).
+41. Kuenneth, C., Schertzer, W. & Ramprasad, R. Copolymer informatics with
+multitask deep neural networks.Macromolecules54, 5957–5961 (2021).
+42. Weininger, D. SMILES, a chemical language and information system.
+1. Introduction to methodology and encoding rules. J. Chem. Inf.
+Comput. Sci. 28,3 1– 36 (1988).
+43. Edwards, C., Zhai, C. & Ji, H. Text2Mol: cross-modal molecule
+retrieval with natural language queries. In Proc. 2021 Conference on
+Empirical Methods in Natural Language Processing (eds. Moens, M.-
+F., Huang, X., Specia, L. & Yih, S. W.) 595 – 607 (Association for
+Computational Linguistics, 2021).
+44. Guo, Z., Sharma, P., Martinez, A., Du, L. & Abraham, R. Multilingual
+molecular representation learning via contrastive pre-training. InProc.
+60th Annual Meeting of the Association for Computational Linguistics
+(eds. Muresan, S., Nakov, P. & Villavicencio, A.) 3441 – 3453
+(Association for Computational Linguistics, 2022).
+45. Stärk, H. et al. 3D infomax improves GNNs for molecular property
+prediction. In Proc. 39th International Conference on Machine
+Learning 20479– 20502 (PMLR, 2022).
+46. Liu, S. et al. Pre-training molecular graph representation with 3D
+geometry. In Proc. 10th International Conference on Learning
+Representations (ICLR, 2022).
+47. Zhu, J. et al. Dual-view molecular pre-training. In Proc. 29th ACM
+SIGKDD Conference on Knowledge Discovery and Data Mining
+3615– 3627 (ACM, 2023).
+48. Feng, S., Yang, L., Ma, W. & Lan, Y. UniMAP: Universal SMILES-graph
+representation learning. Preprint at http://arxiv.org/abs/2310.14216
+(2023).
+49. Han, S. et al. Multimodal transformer for property prediction in
+polymers. ACS Appl. Mater. Interfaces 16, 16853– 16860 (2024).
+https://doi.org/10.1038/s41524-025-01652-z Article
+npj Computational Materials |          (2025) 11:153 10
+
+--- PAGE 11 ---
+50. Wang, F. et al. MMPolymer: a multimodal multitask pretraining
+framework for polymer property prediction. Preprint athttps://doi.org/
+10.48550/arXiv.2406.04727 (2024).
+51. Otsuka, S., Kuwajima, I., Hosoya, J., Xu, Y. & Yamazaki, M. PoLyInfo:
+polymer database for polymeric materials design. In 2011
+International Conference on Emerging Intelligent Data and Web
+Technologies 22– 29 (IEEE, 2011).
+52. Landrum, G. RDKit: a software suite for cheminformatics,
+computational chemistry, and predictive modeling. Greg. Landrum 8,
+31 (2013).
+53. OpenAI et al. GPT-4 technical report. Preprint at https://doi.org/10.
+48550/arXiv.2303.08774 (2024).
+54. Ji, Z. et al. Survey of hallucination in natural language generation. ACM
+Comput. Surv. 55,1 – 38 (2023).
+55. Bang, Y. et al. A multitask, multilingual, multimodal evaluation of ChatGPT
+on reasoning, hallucination, and interactivity. InProc. 13th International
+Joint Conference on Natural Language Processing and the 3rd
+Conference of the Asia-PaciﬁcC h a p t e ro ft h eA s s o c i a t i o nf o r
+Computational Linguistics(Volume 1:Long Papers)675–718 (Association
+for Computational Linguistics, 2023).
+56. Christo ﬁdellis, D. et al. Unifying molecular and textual representations
+via multi-task language modelling. In Proc. 40th International
+Conference on Machine Learning 6140– 6157 (PMLR, 2023).
+57. Raffel, C. et al. Exploring the limits of transfer learning with a uni ﬁed
+text-to-text transformer. J. Mach. Learn. Res. 21,1 – 67 (2020).
+58. Vaswani, A. et al. Attention is all you need. In Proc. 31st International
+Conference on Neural Information Processing Systems 6000– 6010
+(Curran Associates Inc., 2017).
+59. Zolfaghari, M., Zhu, Y., Gehler, P. & Brox, T. Crossclr: cross-modal
+contrastive learning for multi-modal video representations. In Proc.
+IEEE/CVF International Conference on Computer Vision 1450– 1459
+(IEEE, 2021).
+60. van den Oord, A., Li, Y. & Vinyals, O. Representation learning with
+contrastive predictive coding. Preprint at arXiv:1807.03748 (2018).
+61. Christo ﬁdellis, D. et al. Unifying molecular and textual representations
+via multi-task language modelling. In Proc. 40th International
+Conference on Machine Learning 6140– 6157 (JMLR.org, 2023).
+62. Halgren, T. A. Merck molecular force ﬁeld. I. Basis, form, scope,
+parameterization, and performance of MMFF94. J. Comput. Chem.
+17, 490– 519 (1996).
+63. Kingma, D. P. & Ba, J. Adam: a method for stochastic optimization.
+Preprint at https://doi.org/10.48550/arXiv.1412.6980 (2017).
+Acknowledgements
+This study was funded by the National Natural Science Foundation of China,
+No.62474183. The funder played no role in study design, data collection,
+analysis and interpretation of data, or the writing of this manuscript.
+Author contributions
+Q.H. conceived and designed the study, developed the Uni-Poly model, and
+wrote the manuscript. Y.L. contributed to the dataset preparation, per-
+formed model training and evaluation, and assisted with manuscript pre-
+paration. L.Z. supervised the research, provided domain expertise, and
+critically reviewed the manuscript. Q.Z. provided hardware resources, gui-
+dance on framework design, and advice on algorithmic implementation.
+W.Y. provided overarching project supervision, strategic guidance, and
+critical feedback to ensure the study's alignment with broader
+research goals.
+Competing interests
+The authors declare no competing interests.
+Additional information
+Supplementary informationThe online version contains
+supplementary material available at
+https://doi.org/10.1038/s41524-025-01652-z
+.
+Correspondenceand requests for materials should be addressed to
+Lei Zhu or Qibin Zhao.
+Reprints and permissions informationis available at
+http://www.nature.com/reprints
+Publisher’s note Springer Nature remains neutral with regard to
+jurisdictional claims in published maps and institutional afﬁliations.
+Open Access This article is licensed under a Creative Commons
+Attribution-NonCommercial-NoDerivatives 4.0 International License,
+which permits any non-commercial use, sharing, distribution and
+reproduction in any medium or format, as long as you give appropriate
+credit to the original author(s) and the source, provide a link to the Creative
+Commons licence, and indicate if you modi ﬁed the licensed material. You
+do not have permission under this licence to share adapted material
+derived from this article or parts of it. The images or other third party
+material in this article are included in the article ’s Creative Commons
+licence, unless indicated otherwise in a credit line to the material. If material
+is not included in the article’s Creative Commons licence and your intended
+use is not permitted by statutory regulation or exceeds the permitted use,
+you will need to obtain permission directly from the copyright holder. To
+view a copy of this licence, visit http://creativecommons.org/licenses/by-
+nc-nd/4.0/
+.
+© The Author(s) 2025
+https://doi.org/10.1038/s41524-025-01652-z Article
+npj Computational Materials |          (2025) 11:153 11
+

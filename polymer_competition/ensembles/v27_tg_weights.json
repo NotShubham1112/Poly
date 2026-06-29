@@ -1,0 +1,16 @@
+{
+  "experiment": "v27",
+  "target": "tg",
+  "strategy": "auto",
+  "weights": {
+    "catboost": 0.029,
+    "gat": 0.0109,
+    "gcn": 0.0,
+    "lgb": 0.3671,
+    "mlp": 0.3332,
+    "mpnn": 0.0349,
+    "rf": 0.0,
+    "xgb": 0.2249
+  },
+  "cv_score": 38.607657333028605
+}

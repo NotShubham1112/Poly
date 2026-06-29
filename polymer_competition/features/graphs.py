@@ -265,12 +265,13 @@ def _build_kmer(mol, smiles, k, y, star_atoms):
     return data
 
 
-def periodic_graph(smiles: str, k: int = 1, y: Optional[float] = None) -> Optional[Data]:
-    """Build a periodic polymer graph by closing the k-mer chain (Antoniuk-style).
+def periodic_graph(smiles: str, k: int = 3, y: Optional[float] = None) -> Optional[Data]:
+    """Build a periodic polymer graph with k repeat units and boundary edge.
 
-    The right * of the last repeat is bonded to the left * of the first repeat,
-    forming a closed ring. This is the baseline periodic graph used by both the
-    Antoniuk baseline and PolyChain's PECGN component.
+    Following Antoniuk et al. 2022: the periodic graph connects the last atom
+    of the k-mer chain back to the first atom, simulating infinite chain periodicity.
+    Using k=3 (3 repeat units) captures extended chain structure that determines
+    polymer properties like Tg and Egc.
     """
     km = kmer_graph(smiles, k=k, y=y)
     if km is None:
@@ -294,3 +295,13 @@ def periodic_graph(smiles: str, k: int = 1, y: Optional[float] = None) -> Option
     )
 
     return km
+
+
+def multi_scale_periodic_graphs(smiles: str, y: Optional[float] = None) -> dict:
+    """Build periodic graphs at 3 scales: monomer, dimer, trimer."""
+    graphs = {}
+    for k, name in [(1, 'monomer'), (2, 'dimer'), (3, 'trimer')]:
+        g = periodic_graph(smiles, k=k, y=y)
+        if g is not None:
+            graphs[name] = g
+    return graphs

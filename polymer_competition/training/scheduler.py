@@ -113,6 +113,8 @@ class ExperimentScheduler:
             env["CUDA_VISIBLE_DEVICES"] = run.device.split(":")[1]
         elif run.device == "cuda":
             env["CUDA_VISIBLE_DEVICES"] = "0"
+        elif run.device == "cpu":
+            env["CUDA_VISIBLE_DEVICES"] = ""
         cmd_parts.append(f"python -m training.train --model_type {run.model_type}")
         cmd_parts.append(f"--target {run.target} --fold {run.fold}")
         cmd_parts.append(f"--config config.yaml")

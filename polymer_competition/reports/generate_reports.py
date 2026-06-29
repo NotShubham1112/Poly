@@ -25,14 +25,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 def load_all_predictions(pred_dir: Path) -> pd.DataFrame:
-    """Load all OOF .pkl files into a single DataFrame."""
+    """Load all OOF .pkl files into a single DataFrame. Skips _test.pkl files."""
     rows = []
     for pkl in sorted(pred_dir.glob("*.pkl")):
+        if pkl.stem.endswith("_test"):
+            continue
         with open(pkl, "rb") as f:
             data = pickle.load(f)
-        val_idx = np.asarray(data["val_idx"])
-        preds = np.asarray(data["pred"])
-        y = np.asarray(data["y"])
+        val_idx = np.asarray(data.get("val_idx", []))
+        preds = np.asarray(data.get("pred", []))
+        y = np.asarray(data.get("y", []))
+        if len(val_idx) == 0 or len(preds) == 0:
+            continue
         for idx, p, t in zip(val_idx, preds, y):
             rows.append({
                 "idx": int(idx),
@@ -47,7 +51,7 @@ def load_all_predictions(pred_dir: Path) -> pd.DataFrame:
 
 
 def generate_shap_summary(pred_dir: Path, data_dir: Path, output_dir: Path,
-                          target_col: str = "property"):
+                          target_col: str = "target", smiles_col: str = "smiles"):
     """Generate SHAP feature importance using the best tree model."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -73,7 +77,7 @@ def generate_shap_summary(pred_dir: Path, data_dir: Path, output_dir: Path,
             return
 
         df = pd.read_parquet(feat_path)
-        feature_cols = [c for c in df.columns if c not in ("SMILES", "id", target_col)]
+        feature_cols = [c for c in df.columns if c not in (smiles_col, "id", target_col)]
 
         # Train a quick model for SHAP
         from xgboost import XGBRegressor
@@ -236,7 +240,9 @@ def main():
     pred_dir = Path(cfg.get("paths", {}).get("predictions_dir", "predictions/"))
     data_dir = Path(cfg.get("paths", {}).get("data_dir", "data/"))
     output_dir = Path("reports/")
-    target_col = cfg.get("target", {}).get("column", "property")
+    data_cfg = cfg.get("data", {})
+    target_col = data_cfg.get("target_col", "target")
+    smiles_col = data_cfg.get("smiles_col", "smiles")
 
     print("=" * 60)
     print("Generating evaluation reports")
@@ -253,7 +259,7 @@ def main():
     # 3. SHAP
     if not args.skip_shap:
         print("\n[3/3] SHAP Feature Importance")
-        generate_shap_summary(pred_dir, data_dir, output_dir, target_col)
+        generate_shap_summary(pred_dir, data_dir, output_dir, target_col, smiles_col)
     else:
         print("\n[3/3] SHAP — skipped")
 

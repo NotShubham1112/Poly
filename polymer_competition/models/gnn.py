@@ -25,7 +25,8 @@ class GCNRegressor(nn.Module):
         self.convs = nn.ModuleList()
         for _ in range(n_layers):
             self.convs.append(GCNConv(hidden_dim, hidden_dim))
-        self.dropout = dropout
+        self.activations = nn.ModuleList([nn.ReLU() for _ in range(n_layers)])
+        self.dropouts = nn.ModuleList([nn.Dropout(dropout) for _ in range(n_layers)])
         self.head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
@@ -36,11 +37,22 @@ class GCNRegressor(nn.Module):
     def forward(self, data):
         x, edge_index, batch = data.x, data.edge_index, data.batch
         x = F.relu(self.atom_encoder(x))
-        for conv in self.convs:
-            x = F.relu(conv(x, edge_index))
-            x = F.dropout(x, p=self.dropout, training=self.training)
+        for i, conv in enumerate(self.convs):
+            x = conv(x, edge_index)
+            x = self.activations[i](x)
+            x = self.dropouts[i](x)
         g = global_add_pool(x, batch)
         return self.head(g).squeeze(-1)
+
+    def get_embedding(self, data):
+        x, edge_index, batch = data.x, data.edge_index, data.batch
+        x = F.relu(self.atom_encoder(x))
+        for i, conv in enumerate(self.convs):
+            x = conv(x, edge_index)
+            x = self.activations[i](x)
+            x = self.dropouts[i](x)
+        g = global_add_pool(x, batch)
+        return g
 
 
 # ----------------------------------------------------------------------------
@@ -56,7 +68,8 @@ class GATRegressor(nn.Module):
         for _ in range(n_layers):
             self.convs.append(GATConv(hidden_dim, hidden_dim // heads,
                                       heads=heads, dropout=dropout))
-        self.dropout = dropout
+        self.activations = nn.ModuleList([nn.ELU() for _ in range(n_layers)])
+        self.dropouts = nn.ModuleList([nn.Dropout(dropout) for _ in range(n_layers)])
         self.head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
@@ -67,11 +80,22 @@ class GATRegressor(nn.Module):
     def forward(self, data):
         x, edge_index, batch = data.x, data.edge_index, data.batch
         x = F.relu(self.atom_encoder(x))
-        for conv in self.convs:
-            x = F.elu(conv(x, edge_index))
-            x = F.dropout(x, p=self.dropout, training=self.training)
+        for i, conv in enumerate(self.convs):
+            x = conv(x, edge_index)
+            x = self.activations[i](x)
+            x = self.dropouts[i](x)
         g = global_add_pool(x, batch)
         return self.head(g).squeeze(-1)
+
+    def get_embedding(self, data):
+        x, edge_index, batch = data.x, data.edge_index, data.batch
+        x = F.relu(self.atom_encoder(x))
+        for i, conv in enumerate(self.convs):
+            x = conv(x, edge_index)
+            x = self.activations[i](x)
+            x = self.dropouts[i](x)
+        g = global_add_pool(x, batch)
+        return g
 
 
 # ----------------------------------------------------------------------------
@@ -110,7 +134,8 @@ class DMPNNRegressor(nn.Module):
         self.convs = nn.ModuleList([
             EdgeMPN(hidden_dim, edge_dim, hidden_dim) for _ in range(n_layers)
         ])
-        self.dropout = dropout
+        self.activations = nn.ModuleList([nn.Identity() for _ in range(n_layers)])
+        self.dropouts = nn.ModuleList([nn.Dropout(dropout) for _ in range(n_layers)])
         self.head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
@@ -123,11 +148,24 @@ class DMPNNRegressor(nn.Module):
             data.x, data.edge_index, data.edge_attr, data.batch,
         )
         x = F.relu(self.atom_encoder(x))
-        for conv in self.convs:
+        for i, conv in enumerate(self.convs):
             x = conv(x, edge_index, edge_attr)
-            x = F.dropout(x, p=self.dropout, training=self.training)
+            x = self.activations[i](x)
+            x = self.dropouts[i](x)
         g = global_add_pool(x, batch)
         return self.head(g).squeeze(-1)
+
+    def get_embedding(self, data):
+        x, edge_index, edge_attr, batch = (
+            data.x, data.edge_index, data.edge_attr, data.batch,
+        )
+        x = F.relu(self.atom_encoder(x))
+        for i, conv in enumerate(self.convs):
+            x = conv(x, edge_index, edge_attr)
+            x = self.activations[i](x)
+            x = self.dropouts[i](x)
+        g = global_add_pool(x, batch)
+        return g
 
 
 def get_gnn(model_type: str, in_dim: int, edge_dim: int, **kwargs):

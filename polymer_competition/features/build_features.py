@@ -12,13 +12,15 @@ import pandas as pd
 import yaml
 from rdkit import Chem
 from rdkit import __version__ as rdkit_version
-from sklearn.impute import SimpleImputer
 from sklearn.model_selection import GroupKFold
 
 from .fingerprints import all_fingerprints
 from .descriptors import compute_descriptors, select_descriptors_by_variance
 from .custom_polymer import compute_all_custom_features
 from .polymer_descriptors import compute_polymer_descriptors
+from .advanced_descriptors import compute_all_advanced_features
+from .interactions import compute_fingerprint_descriptor_interactions, compute_descriptor_ratios
+from .preprocessing import FeaturePreprocessor
 from data.split_by_target import split_by_target
 
 
@@ -63,6 +65,96 @@ def _smiles_scaffold(smiles: str) -> str:
     return s[:20]
 
 
+def build_periodic_graph_features(smiles_list, n_repeats=3):
+    """Extract descriptors from periodic polymer graphs (Antoniuk et al. 2022).
+    
+    Uses oligomer SMILES to capture chain-level properties that monomer
+    graphs cannot represent.
+    """
+    from rdkit.Chem import Descriptors, rdMolDescriptors
+    from .periodic_polymer import generate_oligomer_smiles
+    
+    records = []
+    for smi in smiles_list:
+        try:
+            oligomer_smi = generate_oligomer_smiles(smi, n_repeats=n_repeats)
+            mol = Chem.MolFromSmiles(oligomer_smi)
+            if mol is None:
+                records.append(_empty_periodic_record())
+                continue
+            
+            record = {
+                'periodic_mw': Descriptors.MolWt(mol),
+                'periodic_logp': Descriptors.MolLogP(mol),
+                'periodic_tpsa': Descriptors.TPSA(mol),
+                'periodic_hbd': Descriptors.NumHDonors(mol),
+                'periodic_hba': Descriptors.NumHAcceptors(mol),
+                'periodic_rotatable': rdMolDescriptors.CalcNumRotatableBonds(mol),
+                'periodic_rings': rdMolDescriptors.CalcNumRings(mol),
+                'periodic_aromatic_rings': rdMolDescriptors.CalcNumAromaticRings(mol),
+                'periodic_heavy_atoms': mol.GetNumHeavyAtoms(),
+                'periodic_fraction_csp3': rdMolDescriptors.CalcFractionCSP3(mol),
+                'periodic_chain_length': n_repeats,
+                'periodic_mw_per_repeat': Descriptors.MolWt(mol) / n_repeats,
+                'periodic_conjugation_ratio': sum(1 for b in mol.GetBonds() if b.GetIsConjugated()) / max(mol.GetNumBonds(), 1),
+                'periodic_backbone_length': mol.GetNumHeavyAtoms() / n_repeats,
+            }
+            records.append(record)
+        except Exception:
+            records.append(_empty_periodic_record())
+    
+    return pd.DataFrame(records)
+
+
+def _empty_periodic_record():
+    return {k: 0.0 for k in [
+        'periodic_mw', 'periodic_logp', 'periodic_tpsa', 'periodic_hbd',
+        'periodic_hba', 'periodic_rotatable', 'periodic_rings', 'periodic_aromatic_rings',
+        'periodic_heavy_atoms', 'periodic_fraction_csp3', 'periodic_chain_length',
+        'periodic_mw_per_repeat', 'periodic_conjugation_ratio', 'periodic_backbone_length'
+    ]}
+
+
+def load_gnn_embeddings(exp_ver, target, n_folds, all_ids) -> pd.DataFrame:
+    """Load GNN embeddings from saved .npy files.
+
+    Only reads val embeddings (features/embeddings/*/fold*_val.npy) for
+    training feature construction. Test embeddings (*_test.npy) are saved
+    by train.py for downstream inference but not consumed here.
+    """
+    import numpy as np
+    from pathlib import Path
+
+    emb_dicts = []
+    for fold in range(n_folds):
+        path = Path(f"features/embeddings/{exp_ver}_{target}/fold{fold}_val.npy")
+        if path.exists():
+            fold_embs = np.load(path, allow_pickle=True).item()
+            emb_dicts.append(fold_embs)
+    if not emb_dicts:
+        return pd.DataFrame()
+    all_ids_flat = []
+    for item in all_ids:
+        if isinstance(item, list):
+            all_ids_flat.extend(item)
+        else:
+            all_ids_flat.append(item)
+    unique_ids = sorted(set(all_ids_flat))
+    if not emb_dicts[0]:
+        return pd.DataFrame()
+    emb_dim = len(next(iter(emb_dicts[0].values())))
+    emb_matrix = np.zeros((len(unique_ids), emb_dim))
+    for fold_embs in emb_dicts:
+        for i, uid in enumerate(unique_ids):
+            if str(uid) in fold_embs:
+                emb_matrix[i] += fold_embs[str(uid)]
+    emb_matrix /= len(emb_dicts)
+    emb_cols = [f"gnn_emb_{i}" for i in range(emb_dim)]
+    result_df = pd.DataFrame(emb_matrix, columns=emb_cols)
+    result_df["id"] = unique_ids
+    return result_df
+
+
 def build_features(config_path: str = "config.yaml") -> None:
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
@@ -98,6 +190,34 @@ def build_features(config_path: str = "config.yaml") -> None:
     cust = compute_all_custom_features(unique_smiles)
     poly_desc = [compute_polymer_descriptors(s) for s in unique_smiles]
     poly_df = pd.DataFrame(poly_desc).add_prefix("polymer_")
+    
+    # Build periodic graph features
+    print("Building periodic graph features...")
+    periodic_features = build_periodic_graph_features(unique_smiles, n_repeats=3)
+    print(f"  Added {periodic_features.shape[1]} periodic graph features")
+
+    # Build advanced polymer features
+    print("Building advanced polymer features...")
+    advanced_features = []
+    for smiles in unique_smiles:
+        mol = Chem.MolFromSmiles(smiles)
+        feat = compute_all_advanced_features(mol)
+        advanced_features.append(feat)
+    advanced_df = pd.DataFrame(advanced_features)
+    print(f"  Added {advanced_df.shape[1]} advanced polymer features")
+
+    # Load GNN embeddings if available
+    exp_ver = cfg.get("experiment", {}).get("version", "v1")
+    gnn_emb_df = load_gnn_embeddings(exp_ver, "tg", cfg["cv"]["n_folds"], train["id"].tolist())
+    if not gnn_emb_df.empty:
+        id_to_canon = dict(zip(train["id"].astype(str), train["canon_smiles"]))
+        gnn_emb_df["canon_smiles"] = gnn_emb_df["id"].astype(str).map(id_to_canon)
+        gnn_emb_df = gnn_emb_df.dropna(subset=["canon_smiles"])
+        gnn_cols = [c for c in gnn_emb_df.columns if c not in ("id", "canon_smiles")]
+        gnn_emb_by_smiles = gnn_emb_df.set_index("canon_smiles").reindex(unique_smiles).fillna(0.0).reset_index(drop=True)
+        print(f"  Added {len(gnn_cols)} GNN embedding features")
+    else:
+        gnn_emb_by_smiles = None
 
     fp_dfs = {}
     for name, arr in fps.items():
@@ -106,18 +226,31 @@ def build_features(config_path: str = "config.yaml") -> None:
     desc_df = desc.drop(columns=["SMILES"], errors="ignore")
     cust_df = cust.drop(columns=["SMILES"], errors="ignore")
 
+    # Build interaction features
+    print("Building interaction features...")
+    all_fp_df = pd.concat(fp_dfs.values(), axis=1).reset_index(drop=True)
+    interactions_df = compute_fingerprint_descriptor_interactions(all_fp_df, desc_df.reset_index(drop=True), top_k=30)
+    ratios_df = compute_descriptor_ratios(desc_df.reset_index(drop=True))
+    print(f"  Added {interactions_df.shape[1]} interaction features, {ratios_df.shape[1]} descriptor ratios")
+
     # Free intermediate DataFrames before building the large cache
     del fps, desc, cust
     gc.collect()
 
-    cache_df = pd.concat(
+    concat_parts = (
         [pd.DataFrame({"canon_smiles": unique_smiles})]
         + [df.astype(np.float32) for df in fp_dfs.values()]
         + [desc_df.reset_index(drop=True).astype(np.float32)]
         + [cust_df.reset_index(drop=True).astype(np.float32)]
-        + [poly_df.astype(np.float32)],
-        axis=1,
+        + [poly_df.astype(np.float32)]
+        + [periodic_features.astype(np.float32)]
+        + [advanced_df.astype(np.float32)]
+        + [interactions_df.astype(np.float32)]
+        + [ratios_df.astype(np.float32)]
     )
+    if gnn_emb_by_smiles is not None:
+        concat_parts.append(gnn_emb_by_smiles.astype(np.float32))
+    cache_df = pd.concat(concat_parts, axis=1)
 
     del fp_dfs, desc_df, cust_df, poly_df
     gc.collect()
@@ -136,8 +269,11 @@ def build_features(config_path: str = "config.yaml") -> None:
         col_vals = cache_df[col].values
         if np.isinf(col_vals).any():
             cache_df[col] = np.where(np.isinf(col_vals), np.nan, col_vals)
-    imputer = SimpleImputer(strategy="median")
-    cache_df[num_cols] = imputer.fit_transform(cache_df[num_cols]).astype(np.float32)
+    # Apply FeaturePreprocessor for imputation, cleaning, and MI-based feature selection
+    y_train_combined = train["target"].values
+    preprocessor = FeaturePreprocessor()
+    preprocessor.fit(cache_df.iloc[:len(train)][num_cols], y=y_train_combined)
+    cache_df[num_cols] = preprocessor.transform(cache_df[num_cols], scale=False)
 
     canon_to_idx = {s: i for i, s in enumerate(cache_df["canon_smiles"].values)}
 

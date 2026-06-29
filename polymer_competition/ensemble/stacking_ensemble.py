@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import yaml
 from sklearn.metrics import r2_score
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import KFold, cross_val_score
 
 
 def load_oof_predictions(pred_dir: Path, exp: str, target: str) -> pd.DataFrame:
@@ -82,7 +82,8 @@ def select_best_meta(oof: np.ndarray, y: np.ndarray,
                             n_jobs=-1),
         "catboost": CatBoostRegressor(iterations=500, depth=3,
                                        learning_rate=0.1, verbose=0,
-                                       random_seed=42),
+                                       random_seed=42,
+                                       task_type="CPU"),
         "elasticnet": ElasticNetCV(l1_ratio=[.1, .5, .7, .9, .95, .99, 1.0],
                                     alphas=[0.01, 0.1, 1.0, 10.0],
                                     max_iter=5000, random_state=42),
@@ -104,6 +105,67 @@ def select_best_meta(oof: np.ndarray, y: np.ndarray,
     print(f"  Best: {best_name} (R² = {best_score:.4f})")
     best_model.fit(oof, y)
     return best_model, best_name, best_score
+
+
+def build_level2_stacking(oof_predictions, targets, meta_learner='ridge'):
+    """
+    Build Level-2 stacking ensemble.
+
+    Args:
+        oof_predictions: Dict of model_name -> OOF predictions
+        targets: Target values
+        meta_learner: Meta-learner type ('ridge', 'lgbm', 'catboost')
+
+    Returns:
+        Trained meta-learner and OOF predictions
+    """
+    from sklearn.linear_model import Ridge, ElasticNet
+
+    # Stack OOF predictions
+    X_meta = pd.DataFrame(oof_predictions)
+
+    # Cross-validation
+    kf = KFold(n_splits=5, shuffle=True, random_state=42)
+    oof_meta = np.zeros(len(targets))
+
+    for fold, (train_idx, val_idx) in enumerate(kf.split(X_meta)):
+        X_train, X_val = X_meta.iloc[train_idx], X_meta.iloc[val_idx]
+        y_train, y_val = targets[train_idx], targets[val_idx]
+
+        # Train meta-learner
+        if meta_learner == 'ridge':
+            model = Ridge(alpha=1.0)
+        elif meta_learner == 'elasticnet':
+            model = ElasticNet(alpha=0.1, l1_ratio=0.5)
+        elif meta_learner == 'lgbm':
+            import lightgbm as lgb
+            model = lgb.LGBMRegressor(n_estimators=100, max_depth=3, verbose=-1)
+        elif meta_learner == 'catboost':
+            from catboost import CatBoostRegressor
+            model = CatBoostRegressor(iterations=100, depth=3, verbose=0)
+        else:
+            raise ValueError(f"Unknown meta-learner: {meta_learner}")
+
+        model.fit(X_train, y_train)
+        oof_meta[val_idx] = model.predict(X_val)
+
+    # Calculate CV score
+    cv_score = r2_score(targets, oof_meta)
+    print(f"Level-2 {meta_learner} CV R²: {cv_score:.4f}")
+
+    # Train on full data
+    if meta_learner == 'ridge':
+        final_model = Ridge(alpha=1.0)
+    elif meta_learner == 'elasticnet':
+        final_model = ElasticNet(alpha=0.1, l1_ratio=0.5)
+    elif meta_learner == 'lgbm':
+        final_model = lgb.LGBMRegressor(n_estimators=100, max_depth=3, verbose=-1)
+    elif meta_learner == 'catboost':
+        final_model = CatBoostRegressor(iterations=100, depth=3, verbose=0)
+
+    final_model.fit(X_meta, targets)
+
+    return final_model, oof_meta, cv_score
 
 
 def try_stage2_stacking(oof: np.ndarray, y: np.ndarray,
@@ -170,6 +232,19 @@ def main():
 
     # Stage-2 stacking (conditional)
     stage2_model, final_score = try_stage2_stacking(oof, y, meta_model, meta_score, model_names)
+
+    # Level-2 stacking
+    print("\nBuilding Level-2 stacking...")
+    level2_models = ['ridge', 'elasticnet', 'lgbm']
+    oof_dict = {name: oof[:, i] for i, name in enumerate(model_names)}
+    for model_name in level2_models:
+        try:
+            final_model, oof_meta, cv_score = build_level2_stacking(
+                oof_dict, y, meta_learner=model_name
+            )
+            print(f"  Level-2 {model_name}: R²={cv_score:.4f}")
+        except Exception as e:
+            print(f"  Level-2 {model_name} failed: {e}")
 
     # Save meta-model info
     model_path = ensemble_dir / f"stacking_{target}.pkl"
