@@ -17,7 +17,7 @@ class MultiTaskModel(nn.Module):
         for h_dim in hidden_dims[:-1]:
             layers.extend([
                 nn.Linear(in_dim, h_dim),
-                nn.BatchNorm1d(h_dim),
+                nn.LayerNorm(h_dim),
                 nn.ReLU(),
                 nn.Dropout(dropout)
             ])
