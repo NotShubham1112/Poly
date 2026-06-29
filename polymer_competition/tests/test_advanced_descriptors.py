@@ -4,7 +4,9 @@ from features.advanced_descriptors import (
     hansen_solubility_parameters,
     free_volume_fraction,
     chain_flexibility,
-    conjugation_length
+    conjugation_length,
+    compute_topological_invariants,
+    TOPOLOGICAL_KEYS,
 )
 
 def test_hansen_solubility_parameters():
@@ -32,3 +34,16 @@ def test_conjugation_length():
     conj_len = conjugation_length(mol)
     assert isinstance(conj_len, int)
     assert conj_len >= 0
+
+
+def test_topological_invariants_produce_values():
+    mol = Chem.MolFromSmiles("CCO")
+    result = compute_topological_invariants(mol)
+    assert result["balaban_j"] > 0
+    assert result["kappa1"] > 0
+    assert len(result) == len(TOPOLOGICAL_KEYS)
+
+
+def test_topological_invariants_none_mol():
+    result = compute_topological_invariants(None)
+    assert all(v == 0.0 for v in result.values())

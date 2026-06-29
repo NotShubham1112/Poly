@@ -160,6 +160,40 @@ def conjugation_length(mol: Chem.Mol) -> int:
     return max_path_len
 
 
+TOPOLOGICAL_KEYS = [
+    "balaban_j", "bertz_ct",
+    "chi0n", "chi1n", "chi2n", "chi3n", "chi4n",
+    "chi0v", "chi1v", "chi2v", "chi3v", "chi4v",
+    "kappa1", "kappa2", "kappa3", "hall_kier_alpha",
+]
+
+
+def compute_topological_invariants(mol: Chem.Mol) -> dict:
+    if mol is None:
+        return {k: 0.0 for k in TOPOLOGICAL_KEYS}
+    try:
+        return {
+            "balaban_j": Descriptors.BalabanJ(mol),
+            "bertz_ct": Descriptors.BertzCT(mol),
+            "chi0n": Descriptors.Chi0n(mol),
+            "chi1n": Descriptors.Chi1n(mol),
+            "chi2n": Descriptors.Chi2n(mol),
+            "chi3n": Descriptors.Chi3n(mol),
+            "chi4n": Descriptors.Chi4n(mol),
+            "chi0v": Descriptors.Chi0v(mol),
+            "chi1v": Descriptors.Chi1v(mol),
+            "chi2v": Descriptors.Chi2v(mol),
+            "chi3v": Descriptors.Chi3v(mol),
+            "chi4v": Descriptors.Chi4v(mol),
+            "kappa1": Descriptors.Kappa1(mol),
+            "kappa2": Descriptors.Kappa2(mol),
+            "kappa3": Descriptors.Kappa3(mol),
+            "hall_kier_alpha": Descriptors.HallKierAlpha(mol),
+        }
+    except Exception:
+        return {k: 0.0 for k in TOPOLOGICAL_KEYS}
+
+
 def compute_all_advanced_features(mol: Chem.Mol) -> dict:
     """
     Compute all advanced polymer descriptors.
@@ -175,7 +209,7 @@ def compute_all_advanced_features(mol: Chem.Mol) -> dict:
     
     dp, dP, dH = hansen_solubility_parameters(mol)
     
-    return {
+    result = {
         'hansen_dp': dp,
         'hansen_dP': dP,
         'hansen_dH': dH,
@@ -184,3 +218,6 @@ def compute_all_advanced_features(mol: Chem.Mol) -> dict:
         'conjugation_length': conjugation_length(mol),
         'total_hansen': dp + dP + dH,
     }
+    topo_features = compute_topological_invariants(mol)
+    result.update(topo_features)
+    return result
