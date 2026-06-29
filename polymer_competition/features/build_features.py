@@ -238,19 +238,23 @@ def build_features(config_path: str = "config.yaml") -> None:
     del fps, desc, cust
     gc.collect()
 
+    def safe_float32(df):
+        """Clip to float32 range before cast to avoid overflow warnings."""
+        return df.clip(-3.38e38, 3.38e38).astype(np.float32)
+
     concat_parts = (
         [pd.DataFrame({"canon_smiles": unique_smiles})]
-        + [df.astype(np.float32) for df in fp_dfs.values()]
-        + [desc_df.reset_index(drop=True).astype(np.float32)]
-        + [cust_df.reset_index(drop=True).astype(np.float32)]
-        + [poly_df.astype(np.float32)]
-        + [periodic_features.astype(np.float32)]
-        + [advanced_df.astype(np.float32)]
-        + [interactions_df.astype(np.float32)]
-        + [ratios_df.astype(np.float32)]
+        + [safe_float32(df) for df in fp_dfs.values()]
+        + [safe_float32(desc_df.reset_index(drop=True))]
+        + [safe_float32(cust_df.reset_index(drop=True))]
+        + [safe_float32(poly_df)]
+        + [safe_float32(periodic_features)]
+        + [safe_float32(advanced_df)]
+        + [safe_float32(interactions_df)]
+        + [safe_float32(ratios_df)]
     )
     if gnn_emb_by_smiles is not None:
-        concat_parts.append(gnn_emb_by_smiles.astype(np.float32))
+        concat_parts.append(gnn_emb_by_smiles.clip(-3.38e38, 3.38e38).astype(np.float32))
     cache_df = pd.concat(concat_parts, axis=1)
 
     del fp_dfs, desc_df, cust_df, poly_df
@@ -271,10 +275,12 @@ def build_features(config_path: str = "config.yaml") -> None:
         if np.isinf(col_vals).any():
             cache_df[col] = np.where(np.isinf(col_vals), np.nan, col_vals)
     # Apply FeaturePreprocessor for imputation, cleaning, and MI-based feature selection
-    y_train_combined = train["target"].values
+    y_train_combined = train["target"].values if "target" in train.columns else np.zeros(len(train))
     preprocessor = FeaturePreprocessor()
     preprocessor.fit(cache_df.iloc[:len(train)][num_cols], y=y_train_combined)
-    cache_df[num_cols] = preprocessor.transform(cache_df[num_cols], scale=False)
+    transformed = preprocessor.transform(cache_df[num_cols], scale=False)
+    for col in transformed.columns:
+        cache_df[col] = transformed[col].values
 
     canon_to_idx = {s: i for i, s in enumerate(cache_df["canon_smiles"].values)}
 
@@ -304,9 +310,9 @@ def build_features(config_path: str = "config.yaml") -> None:
 
     # Convert to float32 before saving (halves parquet size and downstream memory)
     for col in train_feat.select_dtypes(include=["float64"]).columns:
-        train_feat[col] = train_feat[col].astype(np.float32)
+        train_feat[col] = train_feat[col].clip(-3.38e38, 3.38e38).astype(np.float32)
     for col in test_feat.select_dtypes(include=["float64"]).columns:
-        test_feat[col] = test_feat[col].astype(np.float32)
+        test_feat[col] = test_feat[col].clip(-3.38e38, 3.38e38).astype(np.float32)
     train_feat.to_parquet(out_dir / "features_train.parquet", index=False)
     test_feat.to_parquet(out_dir / "features_test.parquet", index=False)
     print(f"Train features: {train_feat.shape}, Test features: {test_feat.shape}")
