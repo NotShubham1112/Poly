@@ -36,9 +36,16 @@ def load_oof_predictions(pred_dir, target, exp_ver="v1"):
             data = pickle.load(f)
         if pkl_path.stem.endswith("_test"):
             continue
-        parts = pkl_path.stem.split("_")
-        model = parts[2]
-        fold = int(parts[3].replace("fold", ""))
+        stem = pkl_path.stem  # e.g. v29_tg_mlp_5seed_fold0
+        # Remove the exp_ver + target prefix to get model+seed+fold
+        suffix = stem[len(f"{exp_ver}_{target}_"):]  # e.g. mlp_5seed_fold0
+        # Find the fold number: last segment starting with "fold"
+        segs = suffix.split("_")
+        fold_part = next(s for s in reversed(segs) if s.startswith("fold"))
+        fold = int(fold_part.replace("fold", ""))
+        # Model name is everything before the seed/fold segments
+        fold_idx = segs.index(fold_part)
+        model = "_".join(segs[:fold_idx])
         if "pred" not in data or "y" not in data:
             continue
         if model not in oof_dict:
