@@ -35,7 +35,8 @@ ALL_MODELS = [
 
 def run_fold(model_type: str, fold: int, config: str, person: str,
              max_samples: int | None = None,
-             epochs: int | None = None) -> dict | None:
+             epochs: int | None = None,
+             target: str | None = None) -> dict | None:
     """Train a single model on a single fold. Return metrics dict or None on failure."""
     # Find model-specific config
     model_cfg_candidates = [
@@ -62,9 +63,13 @@ def run_fold(model_type: str, fold: int, config: str, person: str,
         cmd += ["--epochs", str(epochs)]
     if model_cfg:
         cmd += ["--model_config", model_cfg]
+    if target:
+        cmd += ["--target", target]
 
     print(f"\n{'='*60}")
     print(f"  Training {model_type} fold {fold}")
+    if target:
+        print(f"  Target: {target}")
     print(f"{'='*60}")
 
     result = subprocess.run(cmd, cwd=str(PROJECT_ROOT))
@@ -73,8 +78,15 @@ def run_fold(model_type: str, fold: int, config: str, person: str,
         return None
 
     # Load prediction file to get metrics
-    pred_file = PROJECT_ROOT / "predictions" / f"{person}_{model_type}_fold{fold}.pkl"
-    if pred_file.exists():
+    # File naming: {exp_ver}_{target}_{model_type}_fold{fold}.pkl
+    # or without target: {person}_{model_type}_fold{fold}.pkl (legacy)
+    import glob as glob_mod
+    pred_pattern = str(PROJECT_ROOT / "predictions" / f"*_fold{fold}.pkl")
+    pred_files = [p for p in glob_mod.glob(pred_pattern)
+                  if model_type in p and not p.endswith("_test.pkl")]
+    # Prefer the most recent match
+    if pred_files:
+        pred_file = Path(sorted(pred_files)[-1])
         import pickle
         with open(pred_file, "rb") as f:
             data = pickle.load(f)
@@ -98,25 +110,62 @@ def main():
                         help="Limit samples per fold (smoke test)")
     parser.add_argument("--epochs", type=int, default=None,
                         help="Override training epochs")
+    parser.add_argument("--target", default=None,
+                        help="Target name (tg/egc). Loads target-specific features and splits.")
+    parser.add_argument("--exp_ver", default=None,
+                        help="Override experiment version (e.g. v28). Modifies config before running.")
+    parser.add_argument("--device", default=None,
+                        help="Force device (cpu/cuda). Overrides config.yaml setting.")
     args = parser.parse_args()
 
     with open(PROJECT_ROOT / args.config) as f:
         cfg = yaml.safe_load(f)
 
+    # Override experiment version if specified
+    if args.exp_ver:
+        cfg.setdefault("experiment", {})["version"] = args.exp_ver
+        print(f"Overriding experiment version to: {args.exp_ver}")
+
+    # Override device if specified
+    if args.device:
+        use_cuda = args.device.startswith("cuda")
+        cfg.setdefault("device", {})["use_cuda"] = use_cuda
+        print(f"Overriding device to: {args.device}")
+
     models = args.models.split(",") if args.models else ALL_MODELS
     n_folds = cfg.get("cv", {}).get("n_folds", 5)
     folds = [int(x) for x in args.folds.split(",")] if args.folds else list(range(n_folds))
 
+    # Write modified config to a temp file so train.py can read it
+    import tempfile
+    tmp_config = None
+    if args.exp_ver or args.device:
+        tmp_config = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False, dir=str(PROJECT_ROOT))
+        yaml.dump(cfg, tmp_config)
+        tmp_config.close()
+        config_path = tmp_config.name
+        print(f"Wrote temp config -> {config_path}")
+    else:
+        config_path = args.config
+
     print(f"Running {len(models)} models x {len(folds)} folds = {len(models) * len(folds)} jobs")
+    if args.target:
+        print(f"Target: {args.target}")
 
     # Run all combinations
     all_metrics = []
     for model_type in models:
         for fold in folds:
-            metrics = run_fold(model_type, fold, args.config, args.person,
-                               max_samples=args.max_samples, epochs=args.epochs)
+            metrics = run_fold(model_type, fold, config_path, args.person,
+                               max_samples=args.max_samples, epochs=args.epochs,
+                               target=args.target)
             if metrics:
                 all_metrics.append(metrics)
+
+    # Cleanup temp config
+    if tmp_config:
+        import os
+        os.unlink(tmp_config.name)
 
     if not all_metrics:
         print("No successful training runs. Check errors above.")

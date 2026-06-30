@@ -77,9 +77,44 @@ Submission: `outputs/submissions/submission.csv` (4115 rows)
 - Tests: `python -m pytest tests/`
 - Tests (all but pre-existing failures): `python -m pytest tests/ --ignore=tests/test_ablate.py --ignore=tests/test_run_submission.py`
 
-## TO-DO (next session)
-- Run full pipeline with v29 features: rebuild feature cache, retrain all models 5-fold, run 80-epoch multi-task, build ensemble + submit
-- Target Kaggle notebook with GPU for full pipeline execution
+## v29 Status: Topological Invariants FAILED — v27 Remains Best
+
+### Critical Session Learnings (Jun 29)
+1. **v27 and v28 use IDENTICAL features** — `features_train.parquet` (6394 cols, no GNN embeddings). The ONLY difference is the splits file.
+2. **v27 splits ≠ v28 splits** — Only 12-15% val_idx overlap per fold. Cannot naively ensemble OOF predictions across versions.
+3. **Topological invariants HURT performance** — Adding 16 RDKit topological descriptors (BalabanJ, BertzCT, Chi0-4n/v, Kappa1-3, HallKierAlpha) via `FORCE_KEEP_COLS` in `preprocessing.py` degraded all models because the descriptors are computed on polymer SMILES with wildcards (`*`), producing unreliable values.
+4. **Feature rebuild breaks models** — Rebuilding `features_train.parquet` via `build_features.py` changed periodic feature names and preprocessing, degrading ALL tree models by 0.004–0.030 R².
+5. **Target transforms (quantile) auto-applied** — The `training.target_transforms.enabled: true` in config applies quantile transforms automatically. This was also present during v27 training.
+6. **GNNs get zero weight** — The ensemble optimizer assigns 0% to GCN/GAT/MPNN because their individual R² (0.70–0.80) is far below trees (0.88–0.91).
+
+### Current Best Ensemble (v27 — baseline 0.896)
+| Target | Ensemble R² | Top Model | Top Weight |
+|--------|-------------|-----------|------------|
+| TG     | 0.8754      | lgb       | 36.7%      |
+| EGC    | 0.9121      | xgb       | 40.2%      |
+| Mean   | 0.8938      |           |            |
+
+### Files Modified This Session
+- `features/preprocessing.py` — Added `FORCE_KEEP_COLS` (topological invariants bypass MI selection). **REVERT THIS if you want v27 behavior.**
+- `config.yaml` — Experiment version toggled. Currently set to `v27`.
+- `data/splits_egc.pkl` and `data/splits_tg.pkl` — Restored from v27 reconstructed splits. Keys converted to `train`/`val` format.
+- `data/splits_egc_v27.pkl` and `data/splits_tg_v27.pkl` — Reconstructed v27 splits (from prediction val_idx). Keys use `train_idx`/`val_idx`.
+
+### v27 vs v29 Model Comparison (EGC)
+| Model    | v27 R²  | v29 R² (topo added) | Delta   |
+|----------|---------|---------------------|---------|
+| xgb      | 0.9067  | 0.9027              | -0.004  |
+| lgb      | 0.8986  | 0.8925              | -0.006  |
+| catboost | 0.9021  | 0.8860              | -0.016  |
+| rf       | 0.8811  | 0.8833              | +0.002  |
+| mlp      | 0.8816  | 0.8523              | -0.030  |
+
+### Next Steps to Reach 0.92
+- **Multi-seed MLP** (10 seeds): Reduces variance, expected +0.003–0.005
+- **Target transforms for TG only**: Yeo-Johnson may help TG (currently 0.875)
+- **Retrain MLP with Huber loss**: `--loss huber` for robustness to outliers
+- **Consider GNN retraining**: Current GNNs use v27 splits but their R² is too low. A better GNN architecture or training regime could add diversity.
+- **Do NOT rebuild features**: The current `features_train.parquet` (6394 cols) is the best feature set. Rebuilding changes feature names and preprocessing, degrading performance.
 
 ## Evaluation Metric
 **Mean R²** = (R²_Tg + R²_Egc) / 2. Submission format: CSV with `id` and `target` columns.

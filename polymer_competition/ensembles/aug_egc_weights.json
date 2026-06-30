@@ -1,0 +1,9 @@
+{
+  "experiment": "aug",
+  "target": "egc",
+  "weights": {
+    "xgb": 0.5072,
+    "lgb": 0.4928
+  },
+  "cv_score": 0.8690283773948385
+}

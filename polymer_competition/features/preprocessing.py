@@ -12,6 +12,14 @@ from sklearn.impute import SimpleImputer
 from sklearn.feature_selection import mutual_info_regression
 
 
+FORCE_KEEP_COLS = [
+    "balaban_j", "bertz_ct",
+    "chi0n", "chi1n", "chi2n", "chi3n", "chi4n",
+    "chi0v", "chi1v", "chi2v", "chi3v", "chi4v",
+    "kappa1", "kappa2", "kappa3", "hall_kier_alpha",
+]
+
+
 class FeaturePreprocessor:
     """Feature preprocessing pipeline. Fit on train, transform on test."""
 
@@ -55,13 +63,17 @@ class FeaturePreprocessor:
             if c not in self.cols_to_drop and c not in self.high_corr_mask
         ]
 
-        # MI-based feature selection: keep top 500 if too many features
-        if y is not None and len(self.keep_cols) > 500:
+        # MI-based feature selection: keep top 520 if too many features
+        # 520 = 500 base + 20 buffer for force-kept topological invariants
+        must_keep = [c for c in FORCE_KEEP_COLS if c in X_imputed.columns]
+        n_select = 520
+        if y is not None and len(self.keep_cols) > n_select:
             mi_scores = mutual_info_regression(
                 X_imputed[self.keep_cols].fillna(0), y, random_state=42
             )
-            top_idx = np.argsort(mi_scores)[-500:]
-            self.keep_cols = [self.keep_cols[i] for i in top_idx]
+            top_idx = np.argsort(mi_scores)[-n_select:]
+            mi_kept = [self.keep_cols[i] for i in top_idx]
+            self.keep_cols = list(dict.fromkeys(mi_kept + must_keep))
 
         # Fit scaler on remaining features
         if self.keep_cols:

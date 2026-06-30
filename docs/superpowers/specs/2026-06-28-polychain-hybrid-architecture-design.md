@@ -4,7 +4,7 @@
 **Author:** PolyChain Research Team  
 **Status:** Design Specification  
 
----
+--- 
 
 ## 1. Objective
 
@@ -85,20 +85,6 @@ SMILES
 
 No pretrained transformer embeddings — competition rules prohibit external pre-trained weights. All features are computed via RDKit (approved tool) or engineered from SMILES directly.
 
-#### Feature Preprocessing
-
-Before feeding features into models, apply the following pipeline (configurable per target):
-
-| Step | Method | Rationale |
-|---|---|---|
-| Missing values | Zero-fill for RDKit descriptors (invalid SMILES) | Consistent with competition baseline |
-| Variance threshold | Remove features with zero variance across training set | No information content |
-| Correlation filter | Remove features with pairwise correlation > 0.95 | Reduces multicollinearity for Ridge/MLP |
-| Scaling | StandardScaler (for Ridge/MLP only); tree models are scale-invariant | Some models are sensitive to feature scale |
-| Inf/nan handling | Replace inf with column median; nan with 0 | Prevents numerical errors in training |
-
-All preprocessing is fit on training data only, then applied to test data (no leakage).
-
 ### 3.3 Model Components
 
 #### PolyChain (Graph Neural Network)
@@ -110,11 +96,9 @@ All preprocessing is fit on training data only, then applied to test data (no le
 - **Per-target**: Independent models for Tg and Egc (different structural patterns)
 
 #### Tree Ensemble (Tabular Models)
-- **Primary models**: XGBoost, LightGBM, CatBoost
-- **Optional**: Random Forest (weakest performer, only if compute allows)
-- **Neural**: MLP (FingerprintMLP)
+- **Models**: XGBoost, LightGBM, CatBoost, Random Forest, MLP (FingerprintMLP)
 - **Features**: T1 + T2 + T3 concatenated
-- **Tuning**: Optuna Bayesian optimization, number of trials determined by available runtime budget
+- **Tuning**: Optuna Bayesian optimization (minimum 50 trials per model per target)
 - **CV**: 5-fold, out-of-fold predictions collected for stacking
 - **No pretrained embeddings**: Competition rules prohibit external pre-trained weights; all features must be computed from SMILES using RDKit or engineered from scratch
 
@@ -124,7 +108,7 @@ All preprocessing is fit on training data only, then applied to test data (no le
 |---|---|---|---|
 | L1 | OOF predictions per model per fold | Ridge regression (per target) | L1 meta-features |
 | L2 | L1 features | Nelder-Mead weight optimization | Final ensemble weights |
-| Calibration | Ensemble predictions | Residual correction per target (regression-specific) | Calibrated predictions |
+| Calibration | Ensemble predictions | Platt scaling / isotonic regression (per target) | Calibrated predictions |
 
 Stacking is leakage-free: for each fold, the meta-model is trained on OOF predictions from the other 4 folds.
 
@@ -161,10 +145,10 @@ Expected runtime depends on configuration and hardware (local RTX 3050 6GB, Cola
 ### Phase 5: Kaggle Submission
 - Reproduce final model in Kaggle notebook
 - All training must complete within 30 hrs/week Kaggle GPU quota
-- Full training notebook — run all phases end-to-end on Kaggle infrastructure
-- Do NOT assume inference-only notebooks are allowed unless competition rules explicitly permit uploading trained checkpoints as notebook datasets
+- Option A: Full training notebook (run all phases end-to-end)
+- Option B: Inference-only notebook loading precomputed model weights (check rules permit this)
 - Generate `submission.csv`
-- **Verification**: Notebook reproduces submission identically on Kaggle
+- **Verification**: Notebook reproduces submission identically
 
 ---
 
@@ -180,16 +164,7 @@ Every major addition must justify itself through controlled experiments:
 | + PolyChain | Add OOF predictions from GNN to ensemble | TBD |
 | + Optuna tuning | Replace default params with tuned | TBD |
 | + Stacking | Replace simple average with learned weights | TBD |
-| + Calibration | Post-hoc per-target residual correction | TBD |
-
-**PolyChain component ablations** (each removes one component from the full PolyChain):
-
-| Ablation | What is removed | Purpose |
-|---|---|---|
-| Base GIN only | HAMF, PECGN, CST removed | Quantifies backbone contribution |
-| + HAMF | Add multi-scale fusion | Quantifies cross-scale attention |
-| + PECGN | Add periodic boundary operator | Quantifies periodicity equivariance |
-| + CST | Add chain statistics token | Quantifies polymer-specific features |
+| + Calibration | Post-hoc per-target calibration | TBD |
 
 No pretrained transformer embeddings — competition rules prohibit external pre-trained weights. All features are RDKit-based or engineered from SMILES.
 
@@ -223,36 +198,7 @@ All plots:
 
 ---
 
-## 7. Experiment Tracking
-
-Every experiment must produce the following artifacts for reproducibility:
-
-| Artifact | Purpose |
-|---|---|
-| Configuration snapshot | YAML/JSON of all hyperparameters, features used, model settings |
-| Random seed | Explicit seed for each run (fixed per experiment) |
-| Git commit hash | Code version at time of run |
-| Validation score | Mean R² + per-fold R² for each target |
-| Runtime | Wall-clock time and GPU/CPU utilization |
-| Model weights | Saved checkpoint (for local development only — not used in submission) |
-| Predictions | OOF predictions and test predictions saved to `predictions/` directory |
-
-Use a structured experiment directory:
-```
-outputs/experiments/
-├── {experiment_id}/
-│   ├── config.yaml
-│   ├── metrics.json
-│   ├── runtime.json
-│   ├── predictions/
-│   └── checkpoints/
-```
-
-Experiment IDs are sequential: `exp_001_baseline`, `exp_002_rdkit_desc`, etc.
-
----
-
-## 8. Rules Compliance Checklist
+## 7. Rules Compliance Checklist
 
 - [ ] **Only competition-provided data used** — train.csv and test.csv only. No external polymer datasets.
 - [ ] **No pre-trained weights** — all models trained from scratch on competition data. RDKit (approved tool) used only for feature computation, not as a pretrained model.
@@ -265,19 +211,19 @@ Experiment IDs are sequential: `exp_001_baseline`, `exp_002_rdkit_desc`, etc.
 
 ---
 
-## 9. Success Criteria
+## 8. Success Criteria
 
 | Criterion | Target |
 |---|---|
 | Cross-validation Mean R² | > 0.900 (exceeds baseline 0.888) |
 | Ablation: each component | ΔR² > 0.002 to justify inclusion |
-| Leaderboard score | Measurable improvement over baseline; best achievable within competition constraints |
+| Leaderboard score | Top 10% or better |
 | Reproducibility | Kaggle notebook generates identical submission |
 | Visualizations | All 12+ plot types generated without errors |
 
 ---
 
-## 10. Risks & Mitigations
+## 9. Risks & Mitigations
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|

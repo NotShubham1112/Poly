@@ -1009,6 +1009,18 @@ def main():
                         help="Number of MLP seeds to train and ensemble (default: 1).")
     parser.add_argument("--loss", type=str, default="mse", choices=["mse", "huber"],
                         help="Loss function for neural models.")
+    parser.add_argument("--mlp_arch", default="standard",
+                        choices=["standard", "residual"],
+                        help="MLP architecture: standard (512-256-128) or residual (1024-512-256).")
+    parser.add_argument("--augment", type=str, default=None,
+                        choices=["noise", "mixup", "cutout", "all"],
+                        help="Feature augmentation during MLP training.")
+    parser.add_argument("--aug_noise_std", type=float, default=0.05,
+                        help="Std of Gaussian noise for noise augmentation.")
+    parser.add_argument("--aug_mixup_alpha", type=float, default=0.2,
+                        help="Alpha parameter for mixup augmentation (Beta distribution).")
+    parser.add_argument("--aug_cutout_frac", type=float, default=0.1,
+                        help="Fraction of features to zero out for cutout augmentation.")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -1217,7 +1229,7 @@ def main():
         save_checkpoint(ckpt_payload, final_path)
         print(f"  Checkpoint saved -> {best_path}")
     elif args.model_type in ("mlp",):
-        from models.mlp import FingerprintMLP
+        from models.mlp import FingerprintMLP, ResidualMLP
         X_tr = tr_df[feature_cols].values.astype(np.float32)
         y_tr = tr_df[target_col].values.astype(np.float32)
         X_va = va_df[feature_cols].values.astype(np.float32)
@@ -1231,7 +1243,9 @@ def main():
         base_seed = cfg.get("seed", {}).get("global", 42)
         n_seeds = args.n_seeds
         seed_tag = f"{n_seeds}seed_" if n_seeds > 1 else ""
-        ckpt_tag = f"{exp_ver}_{target}_mlp_{seed_tag}fold{args.fold}"
+        arch_tag = f"_{args.mlp_arch}" if args.mlp_arch != "standard" else ""
+        aug_tag = f"_{args.augment}" if args.augment else ""
+        ckpt_tag = f"{exp_ver}_{target}_mlp{arch_tag}{aug_tag}_{seed_tag}fold{args.fold}"
         ckpt_dir.mkdir(parents=True, exist_ok=True)
 
         if args.loss == "huber":
@@ -1239,28 +1253,62 @@ def main():
         else:
             crit = nn.MSELoss()
 
+        # Augmentation helpers
+        aug_noise = args.aug_noise_std if args.augment in ("noise", "all") else 0.0
+        aug_mixup = args.aug_mixup_alpha if args.augment in ("mixup", "all") else 0.0
+        aug_cutout = args.aug_cutout_frac if args.augment in ("cutout", "all") else 0.0
+
+        def _augment_batch(xb, yb):
+            """Apply feature augmentation to a training batch."""
+            import torch.nn.functional as F
+            if aug_noise > 0:
+                noise = torch.randn_like(xb) * aug_noise
+                xb = xb + noise
+            if aug_mixup > 0:
+                lam = np.random.beta(aug_mixup, aug_mixup)
+                perm = torch.randperm(xb.size(0), device=xb.device)
+                xb = lam * xb + (1 - lam) * xb[perm]
+                yb = lam * yb + (1 - lam) * yb[perm]
+            if aug_cutout > 0:
+                mask = torch.bernoulli(torch.full_like(xb, 1 - aug_cutout))
+                xb = xb * mask
+            return xb, yb
+
         all_pred_va = []
         mlp_seed_state_dicts = []
 
         for s in range(n_seeds):
             set_seed(base_seed + s)
 
-            model = FingerprintMLP(in_dim=X_tr.shape[1]).to(device)
-            opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-5)
-            sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=100)
+            if args.mlp_arch == "residual":
+                model = ResidualMLP(
+                    in_dim=X_tr.shape[1],
+                    hidden_dims=[1024, 512, 256],
+                    dropouts=[0.4, 0.3, 0.2],
+                ).to(device)
+                opt = torch.optim.AdamW(model.parameters(), lr=5e-4, weight_decay=1e-4)
+                sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=150)
+                n_epochs = 150
+                patience = 25
+            else:
+                model = FingerprintMLP(in_dim=X_tr.shape[1]).to(device)
+                opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-5)
+                sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=100)
+                n_epochs = 100
+                patience = 20
 
             best_val_rmse = float("inf")
             best_state = None
-            patience = 20
             bad = 0
 
-            for ep in range(1, 101):
+            for ep in range(1, n_epochs + 1):
                 model.train()
                 idx = np.random.permutation(len(X_tr))
                 for i in range(0, len(X_tr), 64):
                     b = idx[i:i+64]
                     xb = torch.from_numpy(X_tr[b]).to(device)
                     yb = torch.from_numpy(y_tr[b]).to(device)
+                    xb, yb = _augment_batch(xb, yb)
                     opt.zero_grad()
                     pred = model(xb).squeeze(-1)
                     loss = crit(pred, yb)
@@ -1535,10 +1583,11 @@ def main():
         elif args.model_type in ("mlp",):
             if scaler is not None:
                 X_test = scaler.transform(X_test).astype(np.float32)
+            _MLP_cls = ResidualMLP if args.mlp_arch == "residual" else FingerprintMLP
             if n_seeds > 1:
                 test_preds_list = []
                 for s, sd in enumerate(mlp_seed_state_dicts):
-                    m = FingerprintMLP(in_dim=X_test.shape[1]).to(device)
+                    m = _MLP_cls(in_dim=X_test.shape[1]).to(device)
                     m.load_state_dict(sd)
                     m.eval()
                     with torch.no_grad():

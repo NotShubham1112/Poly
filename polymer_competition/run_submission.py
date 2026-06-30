@@ -40,6 +40,37 @@ CONFIG_PATH = REPO_ROOT / "config.yaml"
 
 
 # ---------------------------------------------------------------------------
+# Clipping
+# ---------------------------------------------------------------------------
+def clip_predictions(preds: np.ndarray, y_train: np.ndarray,
+                     lower_pct: float = 0.5, upper_pct: float = 99.5) -> np.ndarray:
+    """Clip predictions to the Winsorized range of the training target.
+
+    Uses percentile-based clipping (not absolute min/max) to avoid the effect
+    of extreme training outliers. A single -90 prediction when the true value
+    is 100 contributes a residual of 190² = 36,100 to the R² penalty.
+
+    Args:
+        preds: Test predictions to clip.
+        y_train: Training target values (used to compute percentiles).
+        lower_pct: Lower percentile (default 0.5).
+        upper_pct: Upper percentile (default 99.5).
+
+    Returns:
+        Clipped predictions.
+    """
+    lower = float(np.percentile(y_train, lower_pct))
+    upper = float(np.percentile(y_train, upper_pct))
+    clipped = np.clip(preds, lower, upper)
+    n_clipped_lo = int(np.sum(preds < lower))
+    n_clipped_hi = int(np.sum(preds > upper))
+    if n_clipped_lo > 0 or n_clipped_hi > 0:
+        print(f"  Clipped {n_clipped_lo} below {lower:.2f}, "
+              f"{n_clipped_hi} above {upper:.2f}")
+    return clipped
+
+
+# ---------------------------------------------------------------------------
 # I/O helpers
 # ---------------------------------------------------------------------------
 def _load_config() -> dict:
@@ -127,8 +158,8 @@ def blend_target(*, target: str, exp_ver: str, pred_dir: Path,
     if all_preds is None:
         raise RuntimeError(f"No consistent OOF folds for {target}")
 
-    # Get the weights (with the chosen strategy)
-    w_vec = wo.get_weights(strategy, all_preds, all_y)
+    # Get the weights (no bias — pure convex combination)
+    w_vec = wo.get_weights(strategy, all_preds, all_y, include_bias=False)
     weights = dict(zip(active, [float(v) for v in w_vec]))
     blend_r2 = float(wo.r2_score(all_y, all_preds @ w_vec))
 

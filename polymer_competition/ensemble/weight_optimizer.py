@@ -55,7 +55,8 @@ def load_oof_predictions(pred_dir, target, exp_ver="v1"):
     return oof_dict
 
 
-def get_weights(strategy: str, oof: np.ndarray, y: np.ndarray) -> np.ndarray:
+def get_weights(strategy: str, oof: np.ndarray, y: np.ndarray,
+                include_bias: bool = False) -> np.ndarray | tuple[np.ndarray, float]:
     """Get ensemble weights per strategy.
 
     Strategies:
@@ -63,13 +64,21 @@ def get_weights(strategy: str, oof: np.ndarray, y: np.ndarray) -> np.ndarray:
       * ``optimize`` — SLSQP over R² (default).
       * ``uncertainty`` — SLSQP warm-started from inverse-variance weights.
 
+    When ``include_bias=True``, optimizes ``[w1, ..., wN, bias]`` where bias
+    is a free parameter bounded to (-100, 100). The weight vector is clipped
+    to non-negative and normalized to sum to 1; the bias floats freely.
+
     Falls back to uniform on NaN/Inf or on optimization failure.
     """
     n = oof.shape[1]
     if strategy in ("uniform", "equal"):
+        if include_bias:
+            return np.concatenate([np.ones(n) / n, [0.0]])
         return np.ones(n) / n
     if np.any(np.isnan(oof)) or np.any(np.isinf(oof)):
         print("WARNING: NaN/Inf in OOF matrix, falling back to uniform weights")
+        if include_bias:
+            return np.concatenate([np.ones(n) / n, [0.0]])
         return np.ones(n) / n
 
     if strategy == "uncertainty":
@@ -77,13 +86,25 @@ def get_weights(strategy: str, oof: np.ndarray, y: np.ndarray) -> np.ndarray:
     else:
         x0 = np.ones(n) / n
 
-    bounds = [(0, 1)] * n
-    constraints = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
-    result = minimize(objective, x0, args=(oof, y),
-                      method="SLSQP", bounds=bounds, constraints=constraints,
-                      options={"maxiter": 1000, "ftol": 1e-8})
+    if include_bias:
+        # Append bias initial guess at 0
+        x0 = np.concatenate([x0, [0.0]])
+        bounds = [(0, 1)] * n + [(-100, 100)]
+        constraints = {"type": "eq", "fun": lambda w: np.sum(w[:n]) - 1}
+        result = minimize(objective_with_bias, x0, args=(oof, y),
+                          method="SLSQP", bounds=bounds, constraints=constraints,
+                          options={"maxiter": 1000, "ftol": 1e-8})
+    else:
+        bounds = [(0, 1)] * n
+        constraints = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
+        result = minimize(objective, x0, args=(oof, y),
+                          method="SLSQP", bounds=bounds, constraints=constraints,
+                          options={"maxiter": 1000, "ftol": 1e-8})
+
     if not result.success:
         print(f"WARNING: Weight optimization failed ({result.message}), using uniform weights")
+        if include_bias:
+            return np.concatenate([np.ones(n) / n, [0.0]])
         return np.ones(n) / n
     return result.x
 
@@ -125,6 +146,15 @@ def r2_score(y_true, y_pred):
 
 def objective(weights, preds_matrix, y_true):
     blended = preds_matrix @ weights
+    return -r2_score(y_true, blended)
+
+
+def objective_with_bias(weights, preds_matrix, y_true):
+    """Objective with bias term. weights[-1] is bias, weights[:-1] are model weights."""
+    n = preds_matrix.shape[1]
+    model_weights = weights[:n]
+    bias = weights[n]
+    blended = preds_matrix @ model_weights + bias
     return -r2_score(y_true, blended)
 
 
