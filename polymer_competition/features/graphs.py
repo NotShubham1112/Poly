@@ -11,7 +11,14 @@ Each builder returns a torch_geometric.data.Data object with:
 
 The SMILES is assumed to use '*' for connection points.
 """
+
 from __future__ import annotations
+
+# BLAS thread limit BEFORE numpy loads OpenBLAS
+import os as _os
+_os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+_os.environ.setdefault("MKL_NUM_THREADS", "1")
+_os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import logging
 import os
@@ -20,7 +27,11 @@ from typing import Optional
 import numpy as np
 import torch
 from rdkit import Chem
+from rdkit import rdBase
 
+# Aggressively suppress RDKit C++ warnings (floods console for polymer SMILES)
+rdBase.DisableLog('rdApp.error')
+rdBase.DisableLog('rdApp.warning')
 os.environ["RDKIT_SKIP_VALIDATION_WARNINGS"] = "1"
 logging.getLogger("rdkit").setLevel(logging.ERROR)
 try:
@@ -174,6 +185,7 @@ def kmer_graph(smiles: str, k: int = 2, y: Optional[float] = None) -> Optional[D
     left of copy i+1. The final molecule is a *-terminated chain of k repeats.
 
     Falls back to monomer graph on construction errors (e.g., terminal heteroatoms).
+    Skips k>=2 for molecules with >50 heavy atoms to avoid OpenBLAS memory crashes.
     """
     mol = _safe_mol(smiles)
     if mol is None:
@@ -185,11 +197,17 @@ def kmer_graph(smiles: str, k: int = 2, y: Optional[float] = None) -> Optional[D
     if len(star_atoms) > 2:
         return smiles_to_graph(smiles, y=y)
 
+    # Skip k-mer for large molecules to prevent OpenBLAS memory allocation failures
+    if k >= 2:
+        n_heavy = mol.GetNumHeavyAtoms()
+        if n_heavy > 50:
+            return smiles_to_graph(smiles, y=y)
+
     try:
         return _build_kmer(mol, smiles, k, y, star_atoms)
     except Exception as e:
         log = logging.getLogger(__name__)
-        log.warning("Failed to build k-mer graph for '%s', falling back to monomer: %s", smiles, e)
+        log.debug("Failed to build k-mer graph for '%s', falling back to monomer: %s", smiles, e)
         return smiles_to_graph(smiles, y=y)
 
 

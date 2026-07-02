@@ -7,7 +7,16 @@ Usage:
     python -m training.train --model_type xgb --fold 0
     python -m training.train --model_type gcn --fold 0
 """
+
 from __future__ import annotations
+
+# Set BLAS thread limits BEFORE numpy/scipy imports (they load OpenBLAS at import time)
+import os as _os
+_os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+_os.environ.setdefault("MKL_NUM_THREADS", "1")
+_os.environ.setdefault("OMP_NUM_THREADS", "1")
+_os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+_os.environ.setdefault("RDKIT_SILENCE_WARNINGS", "1")
 
 import argparse
 import json
@@ -827,6 +836,22 @@ def train_graph(model, train_loader, val_loader, cfg, device, model_type="polych
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
     criterion = nn.MSELoss()
 
+    # SWA setup
+    use_swa = cfg.get("swa", True)
+    swa_model = None
+    swa_start_epoch = None
+    if use_swa:
+        try:
+            from torch.optim.swa_utils import AveragedModel, SWALR
+            swa_model = AveragedModel(model)
+            swa_start_epoch = max(int(epochs * 0.75), epochs - 20)
+            swa_lr = cfg.get("swa_lr", 1e-5)
+            swa_scheduler = SWALR(opt, swa_lr=swa_lr)
+        except ImportError:
+            print("WARNING: SWA not available (torch>=2.0 required), skipping.")
+            use_swa = False
+            swa_model = None
+
     best_val_rmse = float("inf")
     best_state = None
     patience = cfg.get("early_stopping", {}).get("patience", 30)
@@ -915,7 +940,11 @@ def train_graph(model, train_loader, val_loader, cfg, device, model_type="polych
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
                 opt.step()
-        sched.step()
+        if use_swa and swa_model is not None and epoch >= swa_start_epoch:
+            swa_model.update_parameters(model)
+            swa_scheduler.step()
+        else:
+            sched.step()
 
         # Auto-save recovery checkpoint
         if auto_save_every > 0 and epoch % auto_save_every == 0:
@@ -939,9 +968,31 @@ def train_graph(model, train_loader, val_loader, cfg, device, model_type="polych
         preds = np.concatenate(preds)
         gts = np.concatenate(gts)
         val_rmse = rmse(gts, preds)
+        # Evaluate SWA model if active
+        swa_better = False
+        if use_swa and swa_model is not None and epoch >= swa_start_epoch:
+            swa_model.eval()
+            swa_preds = []
+            with torch.no_grad():
+                for batch_dict in val_loader:
+                    if model_type == "polychain":
+                        batch_dict = move_to_device(batch_dict, device)
+                        pred = swa_model(batch_dict)
+                    else:
+                        batch = batch_dict.to(device)
+                        pred = swa_model(batch)
+                    swa_preds.append(pred.cpu().numpy())
+            swa_preds = np.concatenate(swa_preds)
+            swa_val_rmse = rmse(gts, swa_preds)
+            if swa_val_rmse < val_rmse:
+                val_rmse = swa_val_rmse
+                swa_better = True
         if val_rmse < best_val_rmse:
             best_val_rmse = val_rmse
-            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+            if swa_better:
+                best_state = {k: v.detach().clone() for k, v in swa_model.module.state_dict().items()}
+            else:
+                best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
             _save_full("best")
             bad = 0
         else:
@@ -1007,6 +1058,8 @@ def main():
                         help="Skip test inference after training.")
     parser.add_argument("--n_seeds", type=int, default=1,
                         help="Number of MLP seeds to train and ensemble (default: 1).")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Override global seed (for multi-seed training).")
     parser.add_argument("--loss", type=str, default="mse", choices=["mse", "huber"],
                         help="Loss function for neural models.")
     args = parser.parse_args()
@@ -1064,6 +1117,10 @@ def main():
     model_cfg["prefetch_factor"] = train_cfg.get("prefetch_factor", 2)
 
     seed = cfg.get("seed", {}).get("global", 42)
+    if args.seed is not None:
+        seed = args.seed
+        print(f"Overriding seed: {seed}")
+    seed_suffix = f"_s{seed}" if args.seed is not None else ""
     t_start = time.time()
     set_seed(seed)
     use_cuda = torch.cuda.is_available() and cfg.get("device", {}).get("use_cuda", True)
@@ -1396,14 +1453,15 @@ def main():
                 pred = model(batch_dict)
                 preds.append(pred.cpu().numpy())
         pred_va = np.concatenate(preds)
+        model_type_key = f"{args.model_type}{seed_suffix}" if args.seed is not None else args.model_type
         # Save checkpoint for manifest recording
         ckpt_dir.mkdir(parents=True, exist_ok=True)
-        ckpt_tag = f"{exp_ver}_{target}_{args.model_type}_fold{args.fold}"
+        ckpt_tag = f"{exp_ver}_{target}{seed_suffix}_{args.model_type}_fold{args.fold}"
         best_path = ckpt_dir / f"{ckpt_tag}_best.pt"
         final_path = ckpt_dir / f"{ckpt_tag}_final.pt"
         ckpt_payload = {
             "model_state": model.state_dict(),
-            "model_type": args.model_type,
+            "model_type": model_type_key,
             "fold": args.fold,
             "epoch": 0,
             "val_rmse": best_val_rmse,
@@ -1494,10 +1552,11 @@ def main():
     # Save OOF predictions
     pred_dir = Path(cfg["paths"]["predictions_dir"])
     pred_dir.mkdir(parents=True, exist_ok=True)
-    out_file = pred_dir / f"{exp_ver}_{target}_{args.model_type}_{seed_tag}fold{args.fold}.pkl"
+    model_type_key = f"{args.model_type}{seed_suffix}" if args.seed is not None else args.model_type
+    out_file = pred_dir / f"{exp_ver}_{target}_{model_type_key}_{seed_tag}fold{args.fold}.pkl"
     with open(out_file, "wb") as f:
         pickle.dump({"val_idx": val_idx, "pred": pred_va, "y": y_va,
-                     "metrics": metrics, "model_type": args.model_type,
+                     "metrics": metrics, "model_type": model_type_key,
                      "fold": args.fold, "target": target}, f)
     print(f"Saved predictions -> {out_file}")
 
@@ -1587,12 +1646,12 @@ def main():
         if transform_name is not None:
             test_preds = inv_func(test_preds)
 
-        test_out = pred_dir / f"{exp_ver}_{target}_{args.model_type}_{seed_tag}fold{args.fold}_test.pkl"
+        test_out = pred_dir / f"{exp_ver}_{target}_{model_type_key}_{seed_tag}fold{args.fold}_test.pkl"
         with open(test_out, "wb") as f:
             pickle.dump({
                 "id": test_feat["id"].values.tolist(),
                 "pred": test_preds.tolist(),
-                "model_type": args.model_type,
+                "model_type": model_type_key,
                 "fold": args.fold,
                 "target": target,
             }, f)

@@ -26,6 +26,9 @@ def load_oof_predictions(pred_dir, target, exp_ver="v1"):
     """Load out-of-fold predictions matching ``{exp_ver}_{target}_*_fold{k}.pkl``.
 
     Files ending in ``_test`` (test-set predictions) are ignored.
+    Model type is read from the pickle data (``model_type`` key) rather than
+    parsed from the filename, supporting seed-aware model types like
+    ``polychain_boosted_s42``.
     """
     import pickle
     pred_dir = Path(pred_dir)
@@ -36,11 +39,10 @@ def load_oof_predictions(pred_dir, target, exp_ver="v1"):
             data = pickle.load(f)
         if pkl_path.stem.endswith("_test"):
             continue
-        parts = pkl_path.stem.split("_")
-        model = parts[2]
-        fold = int(parts[3].replace("fold", ""))
         if "pred" not in data or "y" not in data:
             continue
+        model = data.get("model_type", "unknown")
+        fold = data.get("fold", 0)
         if model not in oof_dict:
             oof_dict[model] = {"preds": {}, "targets": {}}
         oof_dict[model]["preds"][fold] = np.array(data["pred"])

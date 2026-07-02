@@ -71,10 +71,10 @@ cv:
 training:
   amp: true
   gradient_checkpointing: true
-  num_workers: 2
-  pin_memory: true
-  prefetch_factor: 2
-  batch_size_search: true
+  num_workers: 0
+  pin_memory: false
+  prefetch_factor: 1
+  batch_size_search: false
   grad_accumulation_steps: 2
   
   # Multi-task learning
@@ -120,6 +120,15 @@ model_types:
     extends: "models/polychain/configs/base.yaml"
     overrides:
       hidden_dim: 512
+  polychain_boosted:
+    extends: "models/polychain/configs/base.yaml"
+    overrides:
+      hidden_dim: 384
+      n_backbone_layers: 6
+      n_hamf_layers: 3
+      n_hamf_heads: 8
+      dropout: 0.15
+      batch_size: 16
   polychain_light:
     extends: "models/polychain/configs/base.yaml"
     overrides:
